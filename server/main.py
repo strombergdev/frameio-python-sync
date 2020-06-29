@@ -1,7 +1,7 @@
 import os
 import config
 import frameioclient
-from flask import Flask, jsonify, request, Response, render_template
+from flask import Flask, jsonify, request, Response
 from flask_cors import CORS, cross_origin
 import requests
 import requests.auth
@@ -59,7 +59,7 @@ def authenticated_client():
     """Return authenticated frame.io client either from cache or refresh"""
     if config.client_expires == 'NEVER':
         return config.authenticated_client
-    elif config.client_expires > time():
+    if config.client_expires > time():
         return config.authenticated_client
 
     login = Login.select().limit(1).get()

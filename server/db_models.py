@@ -42,6 +42,7 @@ def init_sync_models(db):
 
         sync = BooleanField(default=False)
         new_data = BooleanField(default=False)
+        last_scan = CharField(default='2014-02-07T00:00:01.000000+00:00')
         deleted_from_frameio = BooleanField(default=False)
         db_delete_requested = BooleanField(default=False)
 
@@ -50,9 +51,11 @@ def init_sync_models(db):
         path = CharField()  # relative to project root
         is_file = BooleanField(default=False)
         asset_id = CharField(default='')
+        parent_id = CharField(default='')
         project_id = CharField()
         original = CharField(default='')
 
+        ignore = BooleanField(default=False)
         on_frameio = BooleanField(default=False)
         on_local_storage = BooleanField(default=False)
         local_xxhash = CharField(default='')

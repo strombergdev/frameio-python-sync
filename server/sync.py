@@ -3,6 +3,7 @@ import os
 from threading import Thread
 from time import sleep
 from time import time
+from datetime import datetime, timezone, timedelta
 
 import requests
 import xxhash
@@ -100,10 +101,10 @@ class SyncLoop(Thread):
 
                 # Check size to see if new data has been added
                 if db_project.sync:
-                    frameio_size = int(project['file_count']) + int(
+                    new_frameio_size = int(project['file_count']) + int(
                         project['folder_count'])
-                    if db_project.frameio_size != frameio_size:
-                        db_project.frameio_size = frameio_size
+                    if new_frameio_size > db_project.frameio_size:
+                        db_project.frameio_size = new_frameio_size
                         db_project.new_data = True
                         db_project.save()
 
@@ -154,86 +155,139 @@ class SyncLoop(Thread):
 
                 self.delete_db_project(project)
 
-    def update_frameio_assets(self, project, parent_folder_path,
-                              parent_asset_id, ignore_folders):
-        """Scans Frame.io for assets and creates new ones in DB.
+    def update_frameio_assets(self, project, ignore_folders):
+        """Fetch assets that've been added since last scan and add them to DB.
 
         :Args:
         project (DB Project)
-        parent_folder_path (String)
-        parent_asset_id (String)
         ignore_folders (List)
         """
-        # Only log on first level, recursive function...
-        if parent_folder_path == "":
-            logger.info('Scanning Frame.io project {} for new assets'.format(
-                project.name))
+        logger.info('Scanning Frame.io project {} for new assets'.format(
+            project.name))
 
-        if parent_folder_path == "":
-            path = parent_folder_path
-        else:
-            path = parent_folder_path + '/'
+        # Always overscan by 10 minutes to help avoid missing assets.
+        start_timestamp = (
+                datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
 
         try:
-            project_assets = authenticated_client().get_asset_children(
-                parent_asset_id)
+            account_id = authenticated_client().get_me()['account_id']
+            new_assets = authenticated_client().get_assets_inserted_after(
+                account_id, project.project_id, project.last_scan)
+
         except (requests.exceptions.ConnectionError,
                 requests.exceptions.HTTPError):
             raise
 
-        folders = []
-        for asset in project_assets:
-            asset_path = path + asset['name']
+        if len(new_assets) == 0:
+            return
 
-            if asset['type'] == 'file':
-                try:
-                    self.Asset.get(
-                        (self.Asset.path == asset_path) &
-                        (self.Asset.project_id == project.project_id))
+        new_folders = [a for a in new_assets if a['type'] == 'folder']
+        new_files = [a for a in new_assets if a['type'] == 'file']
 
-                # New file
-                except self.Asset.DoesNotExist:
-                    if asset['upload_completed_at'] is not None:
-                        try:
-                            asset_hash = asset['checksums']['xx_hash']
-                        except (KeyError, TypeError):
-                            asset_hash = 'None'
+        added_files = 0
+        added_folders = 0
 
-                        self.Asset(name=asset['name'],
-                                   project_id=project.project_id,
-                                   path=asset_path,
-                                   is_file=True,
-                                   asset_id=asset['id'],
-                                   original=asset['original'],
-                                   on_frameio=True,
-                                   frameio_xxhash=asset_hash).save()
-                    else:
-                        # New file but not ready yet. Flag project as updated
-                        # so this file is retried.
-                        project.new_data = True
-                        project.save()
+        # Loop until we find correct folder order and all folders are added.
+        # folder1/folder2/folder3
+        found_folders = 0
+        while found_folders != len(new_folders):
+            for folder in new_folders:
+                ignore = False
 
-            elif asset['type'] == 'folder':
-                if asset['name'] not in ignore_folders:
-                    folders.append(asset)
+                # Folder is at root level.
+                if folder['parent_id'] == project.root_asset_id:
+                    parent_id = project.root_asset_id
+                    parent_path = ''
+
+                # Folder not at root, see if parent is in DB.
+                # If not, skip and continue.
+                else:
                     try:
-                        self.Asset.get(
-                            (self.Asset.path == asset_path) &
-                            (self.Asset.project_id == project.project_id))
+                        parent = self.Asset.get(
+                            self.Asset.asset_id == folder['parent_id'])
+
+                        parent_id = parent.asset_id
+                        parent_path = parent.path
+
+                        if parent.ignore:
+                            ignore = True
 
                     except self.Asset.DoesNotExist:
-                        self.Asset(name=asset['name'],
-                                   project_id=project.project_id,
-                                   path=asset_path,
-                                   asset_id=asset['id'],
-                                   on_frameio=True).save()
+                        continue
 
-        for folder in folders:
-            self.update_frameio_assets(project=project,
-                                       parent_folder_path=os.path.join(
-                                           path, folder['name']),
-                                       parent_asset_id=folder['id'],
-                                       ignore_folders=ignore_folders)
+                # Parent found in DB or folder is at root.
+                # Test if folder already exists in DB, otherwise add it.
+                folder_path = os.path.join(parent_path, folder['name'])
+                try:
+                    self.Asset.get(
+                        (self.Asset.path == folder_path) &
+                        (self.Asset.project_id == project.project_id))
+
+                    # Already synced
+                    found_folders += 1
+
+                except self.Asset.DoesNotExist:
+                    if folder['name'] in ignore_folders:
+                        ignore = True
+
+                    added_folders += 1
+                    self.Asset(name=folder['name'],
+                               project_id=project.project_id,
+                               path=folder_path,
+                               asset_id=folder['id'],
+                               parent_id=parent_id,
+                               ignore=ignore,
+                               on_frameio=True).save()
+
+                    found_folders += 1
+
+        for file in new_files:
+            ignore = False
+
+            # File is at root level.
+            if file['parent_id'] == project.root_asset_id:
+                parent_id = project.root_asset_id
+                parent_path = ''
+
+            # Not at root, find parent in DB.
+            else:
+                parent = self.Asset.get(
+                    self.Asset.asset_id == file['parent_id'])
+                parent_id = parent.asset_id
+                parent_path = parent.path
+
+                if parent.ignore:
+                    ignore = True
+
+            # Parent found in DB or file is at root.
+            # Test if file already exists in DB, otherwise add it.
+            file_path = os.path.join(parent_path, file['name'])
+            try:
+                self.Asset.get(
+                    (self.Asset.path == file_path) &
+                    (self.Asset.project_id == project.project_id))
+
+            # New file
+            except self.Asset.DoesNotExist:
+                added_files += 1
+                self.Asset(name=file['name'],
+                           project_id=project.project_id,
+                           path=file_path,
+                           is_file=True,
+                           asset_id=file['id'],
+                           parent_id=parent_id,
+                           original=file['original'],
+                           ignore=ignore,
+                           on_frameio=True).save()
+
+        if added_folders != 0:
+            logger.info('Added {} folders'.format(added_folders))
+
+        if added_files != 0:
+            logger.info('Added {} files'.format(added_files))
+
+        project.last_scan = start_timestamp
+        project.save()
 
     def update_local_assets(self, project, ignore_folders):
         """Scans local storage for assets and creates new ones in DB.
@@ -313,12 +367,14 @@ class SyncLoop(Thread):
         new_folders = self.Asset.select().where(
             (self.Asset.on_local_storage == False) &
             (self.Asset.is_file == False) &
-            (self.Asset.project_id == project.project_id))
+            (self.Asset.project_id == project.project_id) &
+            (self.Asset.ignore == False))
 
         new_files = self.Asset.select().where(
             (self.Asset.on_local_storage == False) &
             (self.Asset.is_file == True) &
-            (self.Asset.project_id == project.project_id))
+            (self.Asset.project_id == project.project_id) &
+            (self.Asset.ignore == False))
 
         if len(new_folders) == 0 and len(new_files) == 0:
             logger.info('Nothing to download')
@@ -603,8 +659,6 @@ class SyncLoop(Thread):
 
                         self.update_frameio_assets(
                             project=project,
-                            parent_folder_path="",
-                            parent_asset_id=project.root_asset_id,
                             ignore_folders=ignore_folders)
 
                         self.update_local_assets(
