@@ -11,45 +11,65 @@ else:
 
 
 class PaginatedResponse(object):
-  def __init__(self, results=[], page=0, page_size=0, total=0, total_pages=0,
-               client=None, endpoint=None):
-    super(PaginatedResponse, self).__init__()
+  def __init__(self, results=[], limit=None, page_size=0, total=0,
+               total_pages=0, endpoint=None, method=None, payload={},
+               client=None):
     self.results = results
-    self.page = int(page)  # Not used
-    self.page_size = int(page_size)  # Not used
+
+    self.limit = limit
+    self.page_size = int(page_size)
     self.total = int(total)
     self.total_pages = int(total_pages)
 
-    self.client = client
     self.endpoint = endpoint
+    self.method = method
+    self.payload = payload
+    self.client = client
 
-    self.result_index = 0
-    self.asset_index = 0
+    self.asset_index = 0   # Index on current page
+    self.returned = 0      # Total returned count
     self.current_page = 1
 
   def __iter__(self):
     return self
 
   def __next__(self):
-    if self.result_index < 50 and self.asset_index < self.total:
-      self.result_index += 1
-      self.asset_index += 1
-      return self.results[self.result_index - 1]
-
-    if self.current_page < self.total_pages:
-      self.current_page = self.current_page + 1
-      self.result_index = 1
-      self.asset_index += 1
+    # Reset if we've reached end
+    if self.returned == self.limit or self.returned == self.total:
+      self.asset_index = 0
+      self.returned = 0
+      self.current_page = 1
 
       self.results = self.client.get_specific_page(
-        self.endpoint, self.current_page).results
+        self.method, self.endpoint, self.payload, page=1).results
+      raise StopIteration
 
-      return self.results[self.result_index - 1]
+    if self.limit is None or self.returned < self.limit:
+      if self.asset_index < self.page_size and self.returned < self.total:
+        self.asset_index += 1
+        self.returned += 1
+        return self.results[self.asset_index - 1]
+
+      if self.current_page < self.total_pages:
+        self.current_page += 1
+        self.asset_index = 1
+        self.returned += 1
+
+        self.results = self.client.get_specific_page(
+          self.method, self.endpoint, self.payload, self.current_page).results
+
+        return self.results[self.asset_index - 1]
 
     raise StopIteration
 
   def next(self):  # Python 2
     return self.__next__()
+
+  def __len__(self):
+    if self.limit and self.limit < self.total:
+      return self.limit
+
+    return self.total
 
 
 class FrameioClient(object):
@@ -73,7 +93,7 @@ class FrameioClient(object):
 
     return metadata.version('frameioclient')
 
-  def _api_call(self, method, endpoint, payload={}):
+  def _api_call(self, method, endpoint, payload={}, limit=None):
     url = '{}/v2{}'.format(self.host, endpoint)
 
     headers = {
@@ -98,11 +118,13 @@ class FrameioClient(object):
         if int(r.headers.get('total-pages')) > 1:
           return PaginatedResponse(
             results=r.json(),
-            page=r.headers['page-number'],
+            limit=limit,
             page_size=r.headers['per-page'],
             total_pages=r.headers['total-pages'],
             total=r.headers['total'],
             endpoint=endpoint,
+            method=method,
+            payload=payload,
             client=self
           )
 
@@ -110,17 +132,23 @@ class FrameioClient(object):
 
     return r.raise_for_status()
 
-  def get_specific_page(self, endpoint, page):
+  def get_specific_page(self, method, endpoint, payload, page):
     """
     Gets a specific page for that endpoint, used by Pagination Class
 
     :Args:
-      endpoint (string): With asset ID already baked in
+      method (string): 'get', 'post'
+      endpoint (string): endpoint ('/accounts/<ACCOUNT_ID>/teams')
+      payload (dict): Request payload
       page (int): What page to get
     """
-    endpoint = '{}?page={}'.format(endpoint, page)
-    return self._api_call('get', endpoint)
+    if method == 'get':
+      endpoint = '{}?page={}'.format(endpoint, page)
+      return self._api_call(method, endpoint)
 
+    if method == 'post':
+      payload['page'] = page
+      return self._api_call(method, endpoint, payload=payload)
 
   def get_me(self):
     """
@@ -248,18 +276,19 @@ class FrameioClient(object):
     endpoint = '/assets/{}/children'.format(asset_id)
     return self._api_call('get', endpoint, kwargs)
 
-  def get_newest_assets(self, account_id, project_id, page_size):
+  def get_newest_assets(self, account_id, project_id, limit):
     """
     Get project's most recently added assets.
 
     :Args:
       account_id (string): The account id.
       project_id (string): The project id.
-      page_size (int): How many assets to get.
+      limit (int): How many assets to get.
     """
     payload = {
       "account_id": account_id,
-      "page_size": page_size,
+      "page": 1,
+      "page_size": 50,
       "include": "children",
       "sort": "-inserted_at",
       "filter": {
@@ -270,7 +299,7 @@ class FrameioClient(object):
       }
     }
     endpoint = '/search/library'
-    return self._api_call('post', endpoint, payload=payload)
+    return self._api_call('post', endpoint, payload=payload, limit=limit)
 
   def create_asset(self, parent_asset_id, **kwargs):
     """
