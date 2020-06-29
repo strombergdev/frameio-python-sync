@@ -349,7 +349,9 @@ export default {
       return this.projects.filter((project) => project.deleted === false);
     },
     deletedProjects() {
-      return this.projects.filter((project) => project.deleted === true && project.db_delete_requested === false);
+      return this.projects.filter((
+        project,
+      ) => project.deleted === true && project.db_delete_requested === false);
     },
   },
   async created() {
