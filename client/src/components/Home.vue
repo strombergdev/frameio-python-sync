@@ -231,7 +231,7 @@
         />
         <label style="margin-top:10px;">Create subfolder</label>
         <input
-          id="folderInput"
+          id="subFolder"
           v-model="subFolder"
           type="title"
           class="form-control col-4"
@@ -265,10 +265,10 @@
           placeholder="Folder name"
         >
         <button
-          type="button"
+          type="submit"
           class="btn btn-primary btn-sm"
           style="margin-top: 7px;"
-          @click="addIgnoreFolder(newIgnoreFolder)"
+          @click.prevent="addIgnoreFolder(newIgnoreFolder)"
         >ADD</button>
       </form>
       <br>
