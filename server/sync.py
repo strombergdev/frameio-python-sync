@@ -61,6 +61,10 @@ def file_is_ready(file_abs_path):
     return True
 
 
+def inserted_at(asset):
+    return asset['inserted_at']
+
+
 class SyncLoop(Thread):
     def __init__(self):
         super().__init__()
@@ -105,7 +109,7 @@ class SyncLoop(Thread):
                         project['folder_count'])
                     if new_frameio_size > db_project.frameio_size:
                         db_project.frameio_size = new_frameio_size
-                        db_project.new_data = True
+                        db_project.updated = True
                         db_project.save()
 
             except self.Project.DoesNotExist:
@@ -115,7 +119,7 @@ class SyncLoop(Thread):
                              project_id=project['id'],
                              root_asset_id=project['root_asset_id'],
                              team_id=project['team_id'],
-                             new_data=True,
+                             updated=True,
                              on_frameio=True).save()
 
         # Check if any projects have been deleted
@@ -146,7 +150,7 @@ class SyncLoop(Thread):
                 local_size = folder_size(project.local_path)
                 if project.local_size != local_size:
                     project.local_size = local_size
-                    project.new_data = True
+                    project.updated = True
                     project.save()
             else:
                 logger.info(
@@ -154,6 +158,29 @@ class SyncLoop(Thread):
                         project.name))
 
                 self.delete_db_project(project)
+
+    def calculate_missing_paths(self, project, parent_id, parent_path,
+                                ignore_folders, ignore):
+        """Recurse through DB and add missing paths and if folder should be
+        ignored.
+        """
+        children = self.Asset.select().where(
+            (self.Asset.project_id == project.project_id) &
+            (self.Asset.is_file == False) &
+            (self.Asset.parent_id == parent_id))
+
+        for child in children:
+            if child.name in ignore_folders or ignore:
+                ignore = True
+
+            if child.path == '':
+                child.path = os.path.join(parent_path, child.name)
+                child.ignore = ignore
+                child.save()
+                logger.info('Added path to folder')
+
+            self.calculate_missing_paths(project, child.asset_id, child.path,
+                                         ignore_folders, ignore)
 
     def update_frameio_assets(self, project, ignore_folders):
         """Fetch assets that've been added since last scan and add them to DB.
@@ -166,127 +193,130 @@ class SyncLoop(Thread):
             project.name))
 
         # Always overscan by 10 minutes to help avoid missing assets.
-        start_timestamp = (
+        new_scan_timestamp = (
                 datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
 
         try:
             account_id = authenticated_client().get_me()['account_id']
-            new_assets = authenticated_client().get_assets_inserted_after(
+            updated_assets = authenticated_client().get_updated_assets(
                 account_id, project.project_id, project.last_scan)
 
         except (requests.exceptions.ConnectionError,
                 requests.exceptions.HTTPError):
             raise
 
-        if len(new_assets) == 0:
+        # Find assets not already in DB.
+        new_assets = []
+        for asset in updated_assets:
+            try:
+                self.Asset.get(self.Asset.asset_id == asset['id'])
+
+            except self.Asset.DoesNotExist:
+                new_assets.append(asset)
+
+        if not new_assets:
             return
 
         new_folders = [a for a in new_assets if a['type'] == 'folder']
+        new_folders.sort(key=inserted_at)  # Oldest first
         new_files = [a for a in new_assets if a['type'] == 'file']
 
-        added_files = 0
         added_folders = 0
+        added_files = 0
 
-        # Loop until we find correct folder order and all folders are added.
-        # folder1/folder2/folder3
-        found_folders = 0
-        while found_folders != len(new_folders):
-            for folder in new_folders:
+        unknown_parent = False  # If we need to do a full path search or not
+        for folder in new_folders:
+            ignore = False
+            path = ''
+
+            if folder['name'] in ignore_folders:
+                ignore = True
+
+            if folder['parent_id'] == project.root_asset_id:
+                path = folder['name']
+
+            else:
+                try:
+                    parent = self.Asset.get(
+                        self.Asset.asset_id == folder['parent_id'])
+
+                    if parent.path != '':
+                        path = os.path.join(parent.path, folder['name'])
+
+                        if parent.ignore:
+                            ignore = True
+
+                    else:
+                        unknown_parent = True
+
+                except self.Asset.DoesNotExist:
+                    unknown_parent = True
+
+            self.Asset(name=folder['name'],
+                       project_id=project.project_id,
+                       path=path,
+                       asset_id=folder['id'],
+                       parent_id=folder['parent_id'],
+                       ignore=ignore,
+                       on_frameio=True).save()
+            added_folders += 1
+
+        if unknown_parent:
+            logger.info('Calculating missing paths')
+            self.calculate_missing_paths(project=project,
+                                         parent_id=project.root_asset_id,
+                                         parent_path='',
+                                         ignore_folders=ignore_folders,
+                                         ignore=False)
+
+        for file in new_files:
+            if file['upload_completed_at'] is not None:
                 ignore = False
-
-                # Folder is at root level.
-                if folder['parent_id'] == project.root_asset_id:
-                    parent_id = project.root_asset_id
+                if file['parent_id'] == project.root_asset_id:
                     parent_path = ''
 
-                # Folder not at root, see if parent is in DB.
-                # If not, skip and continue.
                 else:
                     try:
                         parent = self.Asset.get(
-                            self.Asset.asset_id == folder['parent_id'])
+                            self.Asset.asset_id == file['parent_id'])
 
-                        parent_id = parent.asset_id
+                        if parent.path == '':
+                            logger.info(
+                                "Parent to {} path is not set, retry".format(
+                                    file['name']))
+                            continue
+
                         parent_path = parent.path
 
                         if parent.ignore:
                             ignore = True
 
                     except self.Asset.DoesNotExist:
+                        logger.info('Parent to {} not found, retry'.format(
+                            file['name']))
                         continue
 
-                # Parent found in DB or folder is at root.
-                # Test if folder already exists in DB, otherwise add it.
-                folder_path = os.path.join(parent_path, folder['name'])
-                try:
-                    self.Asset.get(
-                        (self.Asset.path == folder_path) &
-                        (self.Asset.project_id == project.project_id))
-
-                    # Already synced
-                    found_folders += 1
-
-                except self.Asset.DoesNotExist:
-                    if folder['name'] in ignore_folders:
-                        ignore = True
-
-                    added_folders += 1
-                    self.Asset(name=folder['name'],
-                               project_id=project.project_id,
-                               path=folder_path,
-                               asset_id=folder['id'],
-                               parent_id=parent_id,
-                               ignore=ignore,
-                               on_frameio=True).save()
-
-                    found_folders += 1
-
-        for file in new_files:
-            ignore = False
-
-            # File is at root level.
-            if file['parent_id'] == project.root_asset_id:
-                parent_id = project.root_asset_id
-                parent_path = ''
-
-            # Not at root, find parent in DB.
-            else:
-                parent = self.Asset.get(
-                    self.Asset.asset_id == file['parent_id'])
-                parent_id = parent.asset_id
-                parent_path = parent.path
-
-                if parent.ignore:
-                    ignore = True
-
-            # Parent found in DB or file is at root.
-            # Test if file already exists in DB, otherwise add it.
-            file_path = os.path.join(parent_path, file['name'])
-            try:
-                self.Asset.get(
-                    (self.Asset.path == file_path) &
-                    (self.Asset.project_id == project.project_id))
-
-            # New file
-            except self.Asset.DoesNotExist:
-                added_files += 1
                 self.Asset(name=file['name'],
                            project_id=project.project_id,
-                           path=file_path,
+                           path=os.path.join(parent_path, file['name']),
                            is_file=True,
                            asset_id=file['id'],
-                           parent_id=parent_id,
+                           parent_id=file['parent_id'],
                            original=file['original'],
                            ignore=ignore,
                            on_frameio=True).save()
+                added_files += 1
 
         if added_folders != 0:
             logger.info('Added {} folders'.format(added_folders))
-
         if added_files != 0:
             logger.info('Added {} files'.format(added_files))
 
-        project.last_scan = start_timestamp
+        if len(new_files) != added_files:
+            logger.info('Some files not added, mark as updated to retry')
+            project.updated = True
+
+        project.last_scan = new_scan_timestamp
         project.save()
 
     def update_local_assets(self, project, ignore_folders):
@@ -337,7 +367,7 @@ class SyncLoop(Thread):
                         else:
                             # New file but not ready yet. Flag project as
                             # updated this file is retried
-                            project.new_data = True
+                            project.updated = True
                             project.save()
 
             for name in dirs:
@@ -568,7 +598,7 @@ class SyncLoop(Thread):
             (self.Asset.upload_verified == False))
 
         if len(new_assets) == 0:
-            logger.info('Nothing to verify')
+            return
 
         for asset in new_assets:
             if int(time()) - asset.uploaded_at < 100:
@@ -586,7 +616,7 @@ class SyncLoop(Thread):
                 # Asset no longer available on Frame.io to verify
                 # Maybe sync client crashed when deleting and re-uploading
                 # Delete from DB to restart sync
-                project.new_data = True
+                project.updated = True
                 project.save()
                 asset.delete_instance()
                 return
@@ -630,8 +660,57 @@ class SyncLoop(Thread):
 
         project.delete_instance()
 
+    def remove_ignore_flag(self, assets, ignore_folders):
+        for asset in assets:
+            if asset.is_file:
+                asset.ignore = False
+                asset.save()
+
+            if not asset.is_file:
+                if asset.name not in ignore_folders:
+                    asset.ignore = False
+                    asset.save()
+                    children = self.Asset.select().where(
+                        self.Asset.parent_id == asset.asset_id)
+                    self.remove_ignore_flag(children, ignore_folders)
+
+    def update_ignored_assets(self):
+        """Find ignore folders that have been removed and make sure previously
+        blocked assets are synced.
+
+        Frame.io assets are added to DB even if they match an ignore folder.
+        Removing the ignore flag and download_new_assets will pick them up.
+
+        Local assets are not added to DB if they match an ignore folder, just
+        skipped by update_local_assets. Triggering rescan will add/upload them.
+        """
+        removed_ignore_folders = self.IgnoreFolder.select().where(
+            self.IgnoreFolder.removed == True)
+
+        active_ignore_folders = [folder.name for folder in
+                                 self.IgnoreFolder.select().where(
+                                     self.IgnoreFolder.removed == False)]
+
+        for folder in removed_ignore_folders:
+            logger.info('Removing ignore folder {}'.format(folder.name))
+
+            assets = self.Asset.select().where(
+                (self.Asset.name == folder.name) &
+                (self.Asset.is_file == False))
+
+            self.remove_ignore_flag(assets, active_ignore_folders)
+            folder.delete_instance()
+
+        for project in self.Project.select():  # Trigger re-scan of all
+            project.updated = True
+            project.save()
+
     def run(self):
         logger.info('Sync thread started')
+        for project in self.Project.select():  # Always scan on start
+            project.updated = True
+            project.save()
+
         while True:
             if authenticated_client():
                 try:
@@ -642,20 +721,20 @@ class SyncLoop(Thread):
                     self.update_local_projects()
 
                     updated_projects = self.Project.select().where(
-                        (self.Project.new_data == True) &
+                        (self.Project.updated == True) &
                         (self.Project.sync == True))
 
                     for project in updated_projects:
                         logger.info('Updates in: {}'.format(project.name))
 
-                        # Set project as DONE before asset scans so the below
-                        # functions can revert to NOT DONE if they find
-                        # assets that are new but not done
-                        project.new_data = False
+                        # Below functions can revert this if they find assets
+                        # that are new but not ready to be added yet.
+                        project.updated = False
                         project.save()
 
                         ignore_folders = [folder.name for folder in
-                                          self.IgnoreFolder.select()]
+                                          self.IgnoreFolder.select().where(
+                                              self.IgnoreFolder.removed == False)]
 
                         self.update_frameio_assets(
                             project=project,
@@ -672,20 +751,23 @@ class SyncLoop(Thread):
 
                     self.verify_new_uploads()
 
-                    # Delete projects that have both been deleted from Frame.io
-                    # and the user has requested it be deleted from DB.
-                    for project in self.Project.select().where(
-                            self.Project.db_delete_requested == True):
-                        self.delete_db_project(project)
-
-                    logger.info(
-                        'Sleeping for {} secs'.format(config.SCAN_INTERVAL))
-                    self.db.close()
-
                 except (requests.exceptions.ConnectionError,
                         requests.exceptions.HTTPError):
-                    # Might be temp bad internet.
                     logger.info('Could not connect, retrying in {}'.format(
                         config.SCAN_INTERVAL))
+
+                # Delete project from DB if requested by user.
+                for project in self.Project.select().where(
+                        self.Project.db_delete_requested == True):
+                    self.delete_db_project(project)
+
+                # Updated ignored assets if an ignore folder has been removed.
+                if self.IgnoreFolder.select().where(
+                        self.IgnoreFolder.removed == True):
+                    self.update_ignored_assets()
+
+                logger.info(
+                    'Sleeping for {} secs'.format(config.SCAN_INTERVAL))
+                self.db.close()
 
             sleep(config.SCAN_INTERVAL)

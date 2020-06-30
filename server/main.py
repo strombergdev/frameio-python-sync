@@ -326,7 +326,8 @@ def update_ignore_folders():
     if request.method == 'GET':
         ignore_folders = [{"name": folder.name} for folder in
                           IgnoreFolder.select().where(
-                              IgnoreFolder.type == 'USER')]
+                              (IgnoreFolder.type == 'USER') &
+                              (IgnoreFolder.removed == False))]
         sync_db.close()
         return jsonify(ignore_folders)
 
@@ -338,10 +339,14 @@ def update_ignore_folders():
         return Response(status=200)
 
     if request.method == 'DELETE':
+        # Flag as removed so sync loop updates all assets blocked by it.
         folder = request.get_json()['folder']
 
-        IgnoreFolder.get((IgnoreFolder.type == 'USER') & (
-                IgnoreFolder.name == folder)).delete_instance()
+        db_folder = IgnoreFolder.get((IgnoreFolder.type == 'USER') & (
+                IgnoreFolder.name == folder))
+
+        db_folder.removed = True
+        db_folder.save()
 
         sync_db.close()
         return Response(status=200)

@@ -41,7 +41,7 @@ def init_sync_models(db):
         frameio_size = IntegerField(default=0)
 
         sync = BooleanField(default=False)
-        new_data = BooleanField(default=False)
+        updated = BooleanField(default=False)
         last_scan = CharField(default='2014-02-07T00:00:01.000000+00:00')
         deleted_from_frameio = BooleanField(default=False)
         db_delete_requested = BooleanField(default=False)
@@ -68,6 +68,7 @@ def init_sync_models(db):
     class IgnoreFolder(BaseModel):
         name = CharField()
         type = CharField()
+        removed = BooleanField(default=False)
 
     if db.is_closed():
         db.connect()
