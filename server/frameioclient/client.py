@@ -301,9 +301,9 @@ class FrameioClient(object):
     endpoint = '/search/library'
     return self._api_call('post', endpoint, payload=payload, limit=limit)
 
-  def get_assets_inserted_after(self, account_id, project_id, timestamp):
+  def get_updated_assets(self, account_id, project_id, timestamp):
     """
-    Get project's most recently added assets.
+    Get assets added or updated since timestamp.
 
     :Args:
       account_id (string): The account id.
@@ -322,7 +322,7 @@ class FrameioClient(object):
           "op": "eq",
           "value": project_id
         },
-        "inserted_at": {
+        "updated_at": {
           "op": "gte",
           "value": timestamp
         }
