@@ -74,13 +74,8 @@ class SyncLoop(Thread):
         self.Project, self.Asset, self.IgnoreFolder = init_sync_models(
             self.db)[1:]
 
-    def update_frameio_projects(self):
-        """Get all projects from Frame.io and add new to DB.
-        Check projects size (number of files+folders), and flag it as updated
-        if size has changed since last scan.
-        """
-        logger.info('Scanning Frame.io for updates')
-
+    def update_projects(self):
+        """Get all projects from Frame.io and add new to DB."""
         projects = []
         try:
             for team in authenticated_client().get_all_teams():
@@ -103,31 +98,21 @@ class SyncLoop(Thread):
                         'Renamed project {} to {}'.format(db_project.name,
                                                           project['name']))
 
-                # Check size to see if new data has been added
-                if db_project.sync:
-                    new_frameio_size = int(project['file_count']) + int(
-                        project['folder_count'])
-                    if new_frameio_size > db_project.frameio_size:
-                        db_project.frameio_size = new_frameio_size
-                        db_project.updated = True
-                        db_project.save()
-
             except self.Project.DoesNotExist:
+                logger.info('New project found: {}'.format(project['name']))
+
                 self.Project(name=project['name'],
-                             frameio_size=int(project['file_count']) + int(
-                                 project['folder_count']),
                              project_id=project['id'],
                              root_asset_id=project['root_asset_id'],
                              team_id=project['team_id'],
-                             updated=True,
                              on_frameio=True).save()
 
         # Check if any projects have been deleted
-        active_projects_ids = [project['id'] for project in projects]
+        active_projects = [project['id'] for project in projects]
 
         for db_project in self.Project.select().where(
                 self.Project.deleted_from_frameio == False):
-            if db_project.project_id not in active_projects_ids:
+            if db_project.project_id not in active_projects:
                 db_project.deleted_from_frameio = True
                 db_project.sync = False
                 db_project.save()
@@ -135,29 +120,6 @@ class SyncLoop(Thread):
                 logger.info(
                     "Project {} has been deleted, "
                     "turning off sync.".format(db_project.name))
-
-    def update_local_projects(self):
-        """Get local folders size and flag project as updated if size
-        has changed since last scan. If folder can't be found, turn off sync
-        and delete project and corresponding assets from DB.
-        """
-        logger.info('Scanning local storage for updates')
-
-        projects = self.Project.select().where(self.Project.sync == True)
-        for project in projects:
-            if os.path.isdir(project.local_path):
-                # Check size to see if new data has been added
-                local_size = folder_size(project.local_path)
-                if project.local_size != local_size:
-                    project.local_size = local_size
-                    project.updated = True
-                    project.save()
-            else:
-                logger.info(
-                    'Local folder for {} not found, turning off sync'.format(
-                        project.name))
-
-                self.delete_db_project(project)
 
     def calculate_missing_paths(self, project, parent_id, parent_path,
                                 ignore_folders, ignore):
@@ -177,7 +139,7 @@ class SyncLoop(Thread):
                 child.path = os.path.join(parent_path, child.name)
                 child.ignore = ignore
                 child.save()
-                logger.info('Added path to folder')
+                logger.info('Added path to folder {}'.format(child.path))
 
             self.calculate_missing_paths(project, child.asset_id, child.path,
                                          ignore_folders, ignore)
@@ -189,7 +151,7 @@ class SyncLoop(Thread):
         project (DB Project)
         ignore_folders (List)
         """
-        logger.info('Scanning Frame.io project {} for new assets'.format(
+        logger.info('Scanning {} for new Frame.io assets'.format(
             project.name))
 
         # Always overscan by 10 minutes to help avoid missing assets.
@@ -199,7 +161,7 @@ class SyncLoop(Thread):
         try:
             account_id = authenticated_client().get_me()['account_id']
             updated_assets = authenticated_client().get_updated_assets(
-                account_id, project.project_id, project.last_scan)
+                account_id, project.project_id, project.last_frameio_scan)
 
         except (requests.exceptions.ConnectionError,
                 requests.exceptions.HTTPError):
@@ -214,9 +176,6 @@ class SyncLoop(Thread):
             except self.Asset.DoesNotExist:
                 new_assets.append(asset)
 
-        if not new_assets:
-            return
-
         new_folders = [a for a in new_assets if a['type'] == 'folder']
         new_folders.sort(key=inserted_at)  # Oldest first
         new_files = [a for a in new_assets if a['type'] == 'file']
@@ -224,7 +183,6 @@ class SyncLoop(Thread):
         added_folders = 0
         added_files = 0
 
-        unknown_parent = False  # If we need to do a full path search or not
         for folder in new_folders:
             ignore = False
             path = ''
@@ -246,11 +204,8 @@ class SyncLoop(Thread):
                         if parent.ignore:
                             ignore = True
 
-                    else:
-                        unknown_parent = True
-
                 except self.Asset.DoesNotExist:
-                    unknown_parent = True
+                    pass
 
             self.Asset(name=folder['name'],
                        project_id=project.project_id,
@@ -261,8 +216,8 @@ class SyncLoop(Thread):
                        on_frameio=True).save()
             added_folders += 1
 
-        if unknown_parent:
-            logger.info('Calculating missing paths')
+        # If folders are out of order from Frame.io we need to calc paths.
+        if self.Asset.select().where(self.Asset.path == ''):
             self.calculate_missing_paths(project=project,
                                          parent_id=project.root_asset_id,
                                          parent_path='',
@@ -296,15 +251,22 @@ class SyncLoop(Thread):
                             file['name']))
                         continue
 
-                self.Asset(name=file['name'],
-                           project_id=project.project_id,
-                           path=os.path.join(parent_path, file['name']),
-                           is_file=True,
-                           asset_id=file['id'],
-                           parent_id=file['parent_id'],
-                           original=file['original'],
-                           ignore=ignore,
-                           on_frameio=True).save()
+                # Only add files with unique path and name.
+                asset_path = os.path.join(parent_path, file['name'])
+                try:
+                    self.Asset.get(self.Asset.path == asset_path,
+                                   self.Asset.project_id == project.project_id)
+
+                except self.Asset.DoesNotExist:
+                    self.Asset(name=file['name'],
+                               project_id=project.project_id,
+                               path=asset_path,
+                               is_file=True,
+                               asset_id=file['id'],
+                               parent_id=file['parent_id'],
+                               original=file['original'],
+                               ignore=ignore,
+                               on_frameio=True).save()
                 added_files += 1
 
         if added_folders != 0:
@@ -312,33 +274,71 @@ class SyncLoop(Thread):
         if added_files != 0:
             logger.info('Added {} files'.format(added_files))
 
-        if len(new_files) != added_files:
-            logger.info('Some files not added, mark as updated to retry')
-            project.updated = True
+        if len(new_files) == added_files:  # All done. Moving up timestamp.
+            project.last_frameio_scan = new_scan_timestamp
 
-        project.last_scan = new_scan_timestamp
         project.save()
 
     def update_local_assets(self, project, ignore_folders):
-        """Scans local storage for assets and creates new ones in DB.
+        """Scan local storage for assets and creates new ones in DB.
 
         :Args:
         project (DB project)
         ignore_folders (List)
         """
-        logger.info('Scanning local storage project {} for new assets'.format(
+        abs_project_path = os.path.abspath(project.local_path)
+        if not os.path.isdir(abs_project_path):
+            logger.info(
+                'Local folder for {} not found, turning off sync'.format(
+                    project.name))
+            self.delete_db_project(project)
+            return
+
+        logger.info('Scanning {} for new local assets'.format(
             project.name))
 
-        abs_project_path = os.path.abspath(project.local_path)
+        new_scan_time = int(time())
+        all_assets_ready = True
 
         for root, dirs, files in os.walk(abs_project_path, topdown=True):
             dirs[:] = [d for d in dirs if
                        d not in ignore_folders and not d.startswith(".")]
 
             for name in files:
+                full_path = os.path.join(root, name)
                 if not name.startswith('.'):
-                    path = os.path.relpath(
-                        os.path.join(root, name), abs_project_path)
+                    if os.path.getctime(full_path) > project.last_local_scan:
+                        path = os.path.relpath(full_path, abs_project_path)
+
+                        try:
+                            db_asset = self.Asset.get(
+                                self.Asset.project_id == project.project_id,
+                                self.Asset.path == path)
+
+                            # Already synced
+                            if db_asset.on_local_storage is False:
+                                db_asset.on_local_storage = True
+                                db_asset.save()
+
+                        # New file
+                        except self.Asset.DoesNotExist:
+                            if file_is_ready(full_path):
+                                logger.info(
+                                    'File ready: {}'.format(name))
+                                self.Asset(name=name,
+                                           project_id=project.project_id,
+                                           path=path,
+                                           is_file=True,
+                                           on_local_storage=True,
+                                           local_xxhash=xxhash_file(
+                                               full_path)).save()
+                            else:
+                                all_assets_ready = False
+
+            for name in dirs:
+                full_path = os.path.join(root, name)
+                if os.path.getctime(full_path) > project.last_local_scan:
+                    path = os.path.relpath(full_path, abs_project_path)
 
                     try:
                         db_asset = self.Asset.get(
@@ -347,50 +347,18 @@ class SyncLoop(Thread):
 
                         # Already synced
                         if db_asset.on_local_storage is False:
-                            logger.info(
-                                '{} already synced'.format(db_asset.path))
                             db_asset.on_local_storage = True
                             db_asset.save()
 
-                    # New file
                     except self.Asset.DoesNotExist:
-                        if file_is_ready(os.path.join(root, name)):
-                            logger.info(
-                                'File ready: {}'.format(name))
-                            self.Asset(name=name,
-                                       project_id=project.project_id,
-                                       path=path,
-                                       is_file=True,
-                                       on_local_storage=True,
-                                       local_xxhash=xxhash_file(
-                                           os.path.join(root, name))).save()
-                        else:
-                            # New file but not ready yet. Flag project as
-                            # updated this file is retried
-                            project.updated = True
-                            project.save()
+                        self.Asset(name=name,
+                                   project_id=project.project_id,
+                                   on_local_storage=True,
+                                   path=path).save()
 
-            for name in dirs:
-                path = os.path.relpath(os.path.join(root, name),
-                                       abs_project_path)
-
-                try:
-                    db_asset = self.Asset.get(
-                        self.Asset.project_id == project.project_id,
-                        self.Asset.path == path)
-
-                    # Already synced
-                    if db_asset.on_local_storage is False:
-                        logger.info(
-                            '{} already synced'.format(db_asset.path))
-                        db_asset.on_local_storage = True
-                        db_asset.save()
-
-                except self.Asset.DoesNotExist:
-                    self.Asset(name=name,
-                               project_id=project.project_id,
-                               on_local_storage=True,
-                               path=path).save()
+        if all_assets_ready:
+            project.last_local_scan = new_scan_time
+            project.save()
 
     def download_new_assets(self, project):
         """Get new assets from DB and download them"""
@@ -398,7 +366,8 @@ class SyncLoop(Thread):
             (self.Asset.on_local_storage == False) &
             (self.Asset.is_file == False) &
             (self.Asset.project_id == project.project_id) &
-            (self.Asset.ignore == False))
+            (self.Asset.ignore == False) &
+            (self.Asset.path != ''))
 
         new_files = self.Asset.select().where(
             (self.Asset.on_local_storage == False) &
@@ -407,7 +376,6 @@ class SyncLoop(Thread):
             (self.Asset.ignore == False))
 
         if len(new_folders) == 0 and len(new_files) == 0:
-            logger.info('Nothing to download')
             return
 
         for folder in new_folders:
@@ -422,23 +390,29 @@ class SyncLoop(Thread):
             folder.save()
 
         for file in new_files:
-            logger.info('Downloading: {}'.format(file.name))
             download_folder = os.path.join(project.local_path,
                                            os.path.dirname(file.path))
 
-            try:
-                authenticated_client().download(
-                    asset={"name": file.name, "original": file.original},
-                    download_folder=download_folder)
+            if os.path.isdir(download_folder):
+                logger.info('Downloading: {}'.format(file.path))
 
-            except FileExistsError:
-                pass
+                try:
+                    authenticated_client().download(
+                        asset={"name": file.name, "original": file.original},
+                        download_folder=download_folder,
+                        replace=False)
 
-            # Add local props to new file
-            file.on_local_storage = True
-            file.local_xxhash = xxhash_file(
-                os.path.join(download_folder, file.name))
-            file.save()
+                except FileExistsError:
+                    logger.info('{} already exists.'.format(file.path))
+                    pass
+
+                # Add local props to new file
+                file.on_local_storage = True
+                file.local_xxhash = xxhash_file(
+                    os.path.join(download_folder, file.name))
+                file.save()
+            else:
+                logger.info('Download folder not found: {}'.format(file.path))
 
     @staticmethod
     def new_frameio_folder(name, parent_asset_id):
@@ -528,15 +502,25 @@ class SyncLoop(Thread):
             (self.Asset.project_id == project.project_id))
 
         if len(new_folders) == 0 and len(new_files) == 0:
-            logger.info('Nothing to upload')
             return
 
         for folder in new_folders:
+            if not os.path.isdir(
+                    os.path.join(project.local_path, folder.path)):
+                logger.info("Can't find {}, skipping.".format(folder.name))
+                folder.delete_instance()
+                continue
+
             self.create_frameio_folder_tree(project=project,
                                             new_folder_path=folder.path)
 
         for file in new_files:
-            logger.info('Uploading asset: {}'.format(file.name))
+            if not os.path.isfile(os.path.join(project.local_path, file.path)):
+                logger.info("Can't find {}".format(file.name))
+                file.delete_instance()
+                continue
+
+            logger.info('Uploading asset: {}'.format(file.path))
             abs_path = os.path.abspath(
                 os.path.join(project.local_path, file.path))
 
@@ -549,7 +533,7 @@ class SyncLoop(Thread):
                         file.path)).asset_id
 
             new_asset = self.upload_asset(abs_path, parent_asset_id)
-            logger.info('Upload done: {}'.format(new_asset['name']))
+            logger.info('Upload done')
 
             file.asset_id = new_asset['id']
             file.original = new_asset['original']
@@ -604,7 +588,7 @@ class SyncLoop(Thread):
             if int(time()) - asset.uploaded_at < 100:
                 continue  # Giving Frame.io time to calculate hash.
 
-            logger.info('New upload to verify: {}'.format(asset.name))
+            logger.info('New upload to verify: {}'.format(asset.path))
 
             project = self.Project.get(
                 self.Project.project_id == asset.project_id)
@@ -614,9 +598,10 @@ class SyncLoop(Thread):
                     asset.asset_id)
             except requests.exceptions.HTTPError:
                 # Asset no longer available on Frame.io to verify
-                # Maybe sync client crashed when deleting and re-uploading
-                # Delete from DB to restart sync
-                project.updated = True
+                # Delete from DB and rescan project to try again.
+                project.last_frameio_scan = (
+                        datetime.now(timezone.utc)
+                        - timedelta(days=1)).isoformat()
                 project.save()
                 asset.delete_instance()
                 return
@@ -682,7 +667,7 @@ class SyncLoop(Thread):
         Removing the ignore flag and download_new_assets will pick them up.
 
         Local assets are not added to DB if they match an ignore folder, just
-        skipped by update_local_assets. Triggering rescan will add/upload them.
+        skipped by update_local_assets. Reset last_scan will add/upload them.
         """
         removed_ignore_folders = self.IgnoreFolder.select().where(
             self.IgnoreFolder.removed == True)
@@ -702,40 +687,25 @@ class SyncLoop(Thread):
             folder.delete_instance()
 
         for project in self.Project.select():  # Trigger re-scan of all
-            project.updated = True
+            project.last_local_scan = 0
             project.save()
 
     def run(self):
         logger.info('Sync thread started')
-        for project in self.Project.select():  # Always scan on start
-            project.updated = True
-            project.save()
-
         while True:
             if authenticated_client():
                 try:
                     if self.db.is_closed():
                         self.db.connect()
 
-                    self.update_frameio_projects()
-                    self.update_local_projects()
+                    self.update_projects()
 
-                    updated_projects = self.Project.select().where(
-                        (self.Project.updated == True) &
-                        (self.Project.sync == True))
+                    ignore_folders = [folder.name for folder in
+                                      self.IgnoreFolder.select().where(
+                                          self.IgnoreFolder.removed == False)]
 
-                    for project in updated_projects:
-                        logger.info('Updates in: {}'.format(project.name))
-
-                        # Below functions can revert this if they find assets
-                        # that are new but not ready to be added yet.
-                        project.updated = False
-                        project.save()
-
-                        ignore_folders = [folder.name for folder in
-                                          self.IgnoreFolder.select().where(
-                                              self.IgnoreFolder.removed == False)]
-
+                    for project in self.Project.select().where(
+                            self.Project.sync == True):
                         self.update_frameio_assets(
                             project=project,
                             ignore_folders=ignore_folders)
@@ -771,3 +741,4 @@ class SyncLoop(Thread):
                 self.db.close()
 
             sleep(config.SCAN_INTERVAL)
+            # todo rendering som waits for

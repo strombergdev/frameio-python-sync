@@ -35,14 +35,12 @@ def init_sync_models(db):
         project_id = CharField(default='')
         root_asset_id = CharField(default='')
         team_id = CharField(default='')
-
         local_path = CharField(default='')
-        local_size = IntegerField(default=0)
-        frameio_size = IntegerField(default=0)
 
         sync = BooleanField(default=False)
-        updated = BooleanField(default=False)
-        last_scan = CharField(default='2014-02-07T00:00:01.000000+00:00')
+        last_frameio_scan = CharField(
+            default='2014-02-07T00:00:01.000000+00:00')
+        last_local_scan = IntegerField(default=0)
         deleted_from_frameio = BooleanField(default=False)
         db_delete_requested = BooleanField(default=False)
 
