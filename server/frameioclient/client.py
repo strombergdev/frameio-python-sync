@@ -393,7 +393,7 @@ class FrameioClient(object):
     uploader = FrameioUploader(asset, file)
     uploader.upload()
   
-  def download(self, asset, download_folder):
+  def download(self, asset, download_folder, replace=True):
     """
     Download an asset. The method will exit once the file is downloaded.
 
@@ -405,7 +405,7 @@ class FrameioClient(object):
 
         client.download(asset, "~./Downloads")
     """
-    downloader = FrameioDownloader(asset, download_folder)
+    downloader = FrameioDownloader(asset, download_folder, replace)
     downloader.download()
 
   def get_comment(self, comment_id, **kwargs):
