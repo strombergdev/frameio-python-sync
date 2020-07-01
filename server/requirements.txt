@@ -1,3 +1,0 @@
-peewee==3.13.3
-requests==2.23.0
-xxhash

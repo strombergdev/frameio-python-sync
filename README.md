@@ -79,3 +79,10 @@ Duplicates
     - Multiple assets with the same path and name/team: only the first one to be discovered will be synced.
     - If you replace a file it will not be re-uploaded since the name is still the same.
     
+Renames
+
+
+    - Are ONLY supported for a project name.
+    - If you rename a local file or folder, it will be uploaded as a new asset to Frame.io.
+    - If you rename a Frame.io asset, the corresponding local asset will not be changed.
+    
