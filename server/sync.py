@@ -741,4 +741,4 @@ class SyncLoop(Thread):
                 self.db.close()
 
             sleep(config.SCAN_INTERVAL)
-            # todo rendering som waits for
+
