@@ -127,7 +127,8 @@ class FrameioClient(object):
             payload=payload,
             client=self
           )
-
+      if isinstance(r.json(), list):
+        return r.json()[:limit]
       return r.json()
 
     return r.raise_for_status()
