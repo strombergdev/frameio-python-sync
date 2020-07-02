@@ -10,12 +10,18 @@ class FrameioDownloader(object):
   def download(self):
     original_filename = self.asset['name']
     final_destination = os.path.join(self.download_folder, original_filename)
-    
-    url = self.asset['original']
-    r = requests.get(url)
 
     if os.path.isfile(final_destination) and not self.replace:
-        raise FileExistsError
+      try:
+        raise FileExistsError   # Added in python 3.3
+      except NameError:
+        raise OSError('File exists')
 
-    open(final_destination, 'wb').write(r.content)
-    
+    url = self.asset['original']
+    r = requests.get(url, stream=True)
+
+    handle = open(final_destination, 'wb')
+
+    for chunk in r.iter_content(chunk_size=4096):
+      if chunk:
+        handle.write(chunk)
