@@ -356,10 +356,14 @@ def update_ignore_folders():
 
 @app.route('/api/log', methods=['GET'])
 def latest_log_messages():
-    messages = [log.text for log in
-                LogMessage.select().order_by(LogMessage.created_at).limit(500)]
+    messages = [{"text": log.text, "created_at": log.created_at} for log in
+                LogMessage.select().order_by(
+                    LogMessage.created_at.desc()).limit(500)]
 
+    messages.sort(key=lambda m: m['created_at'])
+    messages[:] = [m['text'] for m in messages]
     log_db.close()
+
     return jsonify(messages)
 
 

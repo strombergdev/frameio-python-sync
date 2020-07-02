@@ -3,6 +3,7 @@ import os
 DB_FOLDER = 'db'
 os.makedirs('db', exist_ok=True)
 
+CONSOLE_LOG = True
 SCAN_INTERVAL = 60
 NEW_FILE_DELTA_INTERVAL = 5  # how long to sleep for to check if render is done
 
