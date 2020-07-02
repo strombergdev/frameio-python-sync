@@ -1,6 +1,6 @@
 # Frame.io python sync 
 
-Keep a local server syncronized with Frame.io.
+Keep a local server synchronized with Frame.io.
 
 
 ### Development Setup
@@ -86,3 +86,6 @@ Renames
     - If you rename a local file or folder, it will be uploaded as a new asset to Frame.io.
     - If you rename a Frame.io asset, the corresponding local asset will not be changed.
     
+
+Using a fork of the [official python client](https://github.com/Frameio/python-frameio-client).
+Thanks to [Jeff](https://github.com/jhodges10) at Frame.io for great input and support! 
