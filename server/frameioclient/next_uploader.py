@@ -3,6 +3,7 @@ import requests
 import threading
 import concurrent.futures
 import os
+import psutil
 
 thread_local = threading.local()
 
@@ -57,10 +58,18 @@ class FrameioUploader(object):
         chunk_offsets = self._calculate_chunks(total_size,
                                                chunk_count=len(upload_urls))
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        if psutil.virtual_memory().available < 3000000000:  # < 3GB
             for i in range(len(upload_urls)):
                 url = upload_urls[i]
                 chunk_offset = chunk_offsets[i]
 
                 task = (url, chunk_offset)
-                executor.submit(self._upload_chunk, task)
+                self._upload_chunk(task)
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                for i in range(len(upload_urls)):
+                    url = upload_urls[i]
+                    chunk_offset = chunk_offsets[i]
+
+                    task = (url, chunk_offset)
+                    executor.submit(self._upload_chunk, task)
