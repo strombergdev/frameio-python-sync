@@ -297,7 +297,7 @@ class SyncLoop(Thread):
         logger.info('Scanning {} for new local assets'.format(
             project.name))
 
-        new_scan_time = int(time())
+        new_scan_time = int(time()) - 500   # Overscan to avoid missing assets.
         all_assets_ready = True
 
         for root, dirs, files in os.walk(abs_project_path, topdown=True):
@@ -307,7 +307,13 @@ class SyncLoop(Thread):
             for name in files:
                 full_path = os.path.join(root, name)
                 if not name.startswith('.'):
-                    if os.path.getctime(full_path) > project.last_local_scan:
+                    try:
+                        c_time = os.path.getctime(full_path)
+                    except FileNotFoundError:
+                        all_assets_ready = False
+                        continue
+
+                    if c_time > project.last_local_scan:
                         path = os.path.relpath(full_path, abs_project_path)
 
                         try:
@@ -322,22 +328,33 @@ class SyncLoop(Thread):
 
                         # New file
                         except self.Asset.DoesNotExist:
-                            if file_is_ready(full_path):
-                                logger.info(
-                                    'File ready: {}'.format(name))
-                                self.Asset(name=name,
-                                           project_id=project.project_id,
-                                           path=path,
-                                           is_file=True,
-                                           on_local_storage=True,
-                                           local_xxhash=xxhash_file(
-                                               full_path)).save()
-                            else:
+                            try:
+                                if file_is_ready(full_path):
+                                    logger.info(
+                                        'File ready: {}'.format(name))
+                                    self.Asset(name=name,
+                                               project_id=project.project_id,
+                                               path=path,
+                                               is_file=True,
+                                               on_local_storage=True,
+                                               local_xxhash=xxhash_file(
+                                                   full_path)).save()
+                                else:
+                                    all_assets_ready = False
+
+                            except FileNotFoundError:
+                                logger.info('File not found {}'.format(name))
                                 all_assets_ready = False
 
             for name in dirs:
                 full_path = os.path.join(root, name)
-                if os.path.getctime(full_path) > project.last_local_scan:
+                try:
+                    c_time = os.path.getctime(full_path)
+                except FileNotFoundError:
+                    all_assets_ready = False
+                    continue
+
+                if c_time > project.last_local_scan:
                     path = os.path.relpath(full_path, abs_project_path)
 
                     try:
@@ -408,8 +425,6 @@ class SyncLoop(Thread):
 
                 # Add local props to new file
                 file.on_local_storage = True
-                file.local_xxhash = xxhash_file(
-                    os.path.join(download_folder, file.name))
                 file.save()
             else:
                 logger.info('Download folder not found: {}'.format(file.path))
@@ -554,8 +569,14 @@ class SyncLoop(Thread):
             return
 
         authenticated_client().delete_asset(asset.asset_id)
+
         abs_path = os.path.abspath(
             os.path.join(project.local_path, asset.path))
+
+        if not os.path.isfile(abs_path):
+            logger.info('{} not found'.format(asset.name))
+            asset.delete_instance()
+            return
 
         if os.path.dirname(asset.path) == '':
             parent_asset_id = project.root_asset_id
@@ -741,4 +762,3 @@ class SyncLoop(Thread):
                 self.db.close()
 
             sleep(config.SCAN_INTERVAL)
-
