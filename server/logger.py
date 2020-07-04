@@ -49,11 +49,6 @@ class PurgeOldLogMessages(Thread):
 
     def run(self):
         while True:
-            logger.info(
-                'Removing log messages older than {} day(s) from DB'.format(
-                    self.log_ttl / 86400))
-
-            logger.info('Logs in db: {}'.format(len(self.LogMessage.select())))
             old_messages = self.LogMessage.select().where(
                 (time() - self.LogMessage.created_at) > self.log_ttl)
 
