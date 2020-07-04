@@ -43,28 +43,6 @@ def folder_size(path):
     return total_size
 
 
-def file_is_ready(file_abs_path):
-    """Checks if a files is rendered/copied completely."""
-    logger.info(
-        'Checking if file is ready: {}'.format(
-            os.path.basename(file_abs_path)))
-
-    file_size = os.path.getsize(file_abs_path)
-
-    if file_size == 0:
-        return False
-
-    sleep(config.NEW_FILE_DELTA_INTERVAL)
-    if os.path.getsize(file_abs_path) != file_size:
-        return False
-
-    return True
-
-
-def inserted_at(asset):
-    return asset['inserted_at']
-
-
 class SyncLoop(Thread):
     def __init__(self):
         super().__init__()
@@ -177,7 +155,7 @@ class SyncLoop(Thread):
                 new_assets.append(asset)
 
         new_folders = [a for a in new_assets if a['type'] == 'folder']
-        new_folders.sort(key=inserted_at)  # Oldest first
+        new_folders.sort(key=lambda a: a['inserted_at'])  # Oldest first
         new_files = [a for a in new_assets if a['type'] == 'file']
 
         added_folders = 0
@@ -297,7 +275,7 @@ class SyncLoop(Thread):
         logger.info('Scanning {} for new local assets'.format(
             project.name))
 
-        new_scan_time = int(time()) - 500   # Overscan to avoid missing assets.
+        new_scan_time = int(time()) - 500  # Overscan to avoid missing assets.
         all_assets_ready = True
 
         for root, dirs, files in os.walk(abs_project_path, topdown=True):
@@ -308,12 +286,21 @@ class SyncLoop(Thread):
                 full_path = os.path.join(root, name)
                 if not name.startswith('.'):
                     try:
-                        c_time = os.path.getctime(full_path)
+                        create_time = os.path.getctime(full_path)
                     except FileNotFoundError:
                         all_assets_ready = False
                         continue
 
-                    if c_time > project.last_local_scan:
+                    # Add new file criteria
+                    # - Created since last complete scan (all_assets_ready)
+                    # - Not changed in the last 60 secs
+                    # - Size not 0
+                    if create_time > project.last_local_scan:
+                        if (time() - create_time) < 60 or os.path.getsize(
+                                full_path) == 0:
+                            all_assets_ready = False
+                            continue
+
                         path = os.path.relpath(full_path, abs_project_path)
 
                         try:
@@ -328,33 +315,29 @@ class SyncLoop(Thread):
 
                         # New file
                         except self.Asset.DoesNotExist:
+                            logger.info('New file: {}'.format(name))
                             try:
-                                if file_is_ready(full_path):
-                                    logger.info(
-                                        'File ready: {}'.format(name))
-                                    self.Asset(name=name,
-                                               project_id=project.project_id,
-                                               path=path,
-                                               is_file=True,
-                                               on_local_storage=True,
-                                               local_xxhash=xxhash_file(
-                                                   full_path)).save()
-                                else:
-                                    all_assets_ready = False
-
+                                file_hash = xxhash_file(full_path)
                             except FileNotFoundError:
-                                logger.info('File not found {}'.format(name))
                                 all_assets_ready = False
+                                continue
+
+                            self.Asset(name=name,
+                                       project_id=project.project_id,
+                                       path=path,
+                                       is_file=True,
+                                       on_local_storage=True,
+                                       local_xxhash=file_hash).save()
 
             for name in dirs:
                 full_path = os.path.join(root, name)
                 try:
-                    c_time = os.path.getctime(full_path)
+                    create_time = os.path.getctime(full_path)
                 except FileNotFoundError:
                     all_assets_ready = False
                     continue
 
-                if c_time > project.last_local_scan:
+                if create_time > project.last_local_scan:
                     path = os.path.relpath(full_path, abs_project_path)
 
                     try:
@@ -414,6 +397,13 @@ class SyncLoop(Thread):
                 logger.info('Downloading: {}'.format(file.path))
 
                 try:
+                    authenticated_client().get_asset(file.asset_id)
+                except requests.exceptions.HTTPError:
+                    logger.info('File removed from Frame.io')
+                    file.delete_instance()
+                    continue
+
+                try:
                     authenticated_client().download(
                         asset={"name": file.name, "original": file.original},
                         download_folder=download_folder,
@@ -421,7 +411,6 @@ class SyncLoop(Thread):
 
                 except FileExistsError:
                     logger.info('{} already exists.'.format(file.path))
-                    pass
 
                 # Add local props to new file
                 file.on_local_storage = True
@@ -568,7 +557,10 @@ class SyncLoop(Thread):
             asset.save()
             return
 
-        authenticated_client().delete_asset(asset.asset_id)
+        try:
+            authenticated_client().delete_asset(asset.asset_id)
+        except requests.exceptions.HTTPError:   # Deleted by user already.
+            pass
 
         abs_path = os.path.abspath(
             os.path.join(project.local_path, asset.path))
@@ -712,7 +704,6 @@ class SyncLoop(Thread):
             project.save()
 
     def run(self):
-        logger.info('Sync thread started')
         while True:
             if authenticated_client():
                 try:
@@ -757,8 +748,7 @@ class SyncLoop(Thread):
                         self.IgnoreFolder.removed == True):
                     self.update_ignored_assets()
 
+                self.db.close()
                 logger.info(
                     'Sleeping for {} secs'.format(config.SCAN_INTERVAL))
-                self.db.close()
-
             sleep(config.SCAN_INTERVAL)
