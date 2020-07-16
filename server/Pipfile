@@ -12,6 +12,7 @@ xxhash = "*"
 flask = "*"
 flask-cors = "*"
 psutil = "*"
+python-dateutil = "*"
 
 [requires]
 python_version = "3.7"

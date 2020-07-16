@@ -383,22 +383,34 @@ class SyncLoop(Thread):
             folder.save()
 
         for file in new_files:
+            try:
+                asset = authenticated_client().get_asset(file.asset_id)
+            except requests.exceptions.HTTPError:
+                logger.info('File removed from Frame.io')
+                file.delete_instance()
+                continue
+
+            checksums = asset['checksums']
+            if checksums is None:
+                logger.info('No checksum for {}'.format(file.name))
+
+                # Allow Frame.io some time to calculate hash, retry next loop
+                asset_uploaded_epoch = parser.parse(
+                    asset['upload_completed_at']).timestamp()
+                if time() - asset_uploaded_epoch < 300:
+                    logger.info('Waiting for checksum'.format(file.name))
+                    continue
+
             download_folder = os.path.join(project.local_path,
                                            os.path.dirname(file.path))
 
             if os.path.isdir(download_folder):
-                logger.info('Downloading: {}'.format(file.path))
-
-                try:
-                    authenticated_client().get_asset(file.asset_id)
-                except requests.exceptions.HTTPError:
-                    logger.info('File removed from Frame.io')
-                    file.delete_instance()
-                    continue
+                logger.info('Downloading: {} at {}'.format(file.path, time()))
 
                 try:
                     authenticated_client().download(
-                        asset={"name": file.name, "original": file.original},
+                        asset={"name": file.name, "original": file.original,
+                               "checksums": checksums},
                         download_folder=download_folder,
                         replace=False)
 
@@ -410,6 +422,7 @@ class SyncLoop(Thread):
                 file.save()
             else:
                 logger.info('Download folder not found: {}'.format(file.path))
+                file.delete_instance()
 
     @staticmethod
     def new_frameio_folder(name, parent_asset_id):
@@ -552,7 +565,7 @@ class SyncLoop(Thread):
 
         try:
             authenticated_client().delete_asset(asset.asset_id)
-        except requests.exceptions.HTTPError:   # Deleted by user already.
+        except requests.exceptions.HTTPError:  # Deleted by user already.
             pass
 
         abs_path = os.path.abspath(
