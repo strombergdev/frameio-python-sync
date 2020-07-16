@@ -4,43 +4,16 @@ from threading import Thread
 from time import sleep
 from time import time
 from datetime import datetime, timezone, timedelta
+from dateutil import parser
 
 import requests
-import xxhash
 from peewee import SqliteDatabase
 
 import config
 from db_models import init_sync_models
 from logger import logger
 from main import authenticated_client
-
-
-def xxhash_file(fname):
-    """Calculate XXHash 64 of file and return it."""
-    logger.info(
-        'Calculating local hash of: {}'.format(os.path.basename(fname)))
-
-    xx_hash = xxhash.xxh64()
-    with open(fname, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            xx_hash.update(chunk)
-    return xx_hash.hexdigest()
-
-
-def folder_size(path):
-    """Calculate total folder size, including the dirs size on file system."""
-    total_size = 0
-    for dirpath, dirnames, filenames in os.walk(path):
-        for f in filenames:
-            fp = os.path.join(dirpath, f)
-            # skip if it is symbolic link
-            if not os.path.islink(fp):
-                total_size += os.path.getsize(fp)
-        for f in dirnames:
-            fp = os.path.join(dirpath, f)
-            total_size += os.path.getsize(fp)
-
-    return total_size
+from frameioclient.utils import calculate_hash
 
 
 class SyncLoop(Thread):
