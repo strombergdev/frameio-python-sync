@@ -133,8 +133,17 @@ class SyncLoop(Thread):
 
         added_folders = 0
         added_files = 0
+        duplicates_folders = 0
+        duplicates_files = 0
 
+        # Filter out duplicate folders with same name/path
+        new_folders_filtered = []
         for folder in new_folders:
+            if (folder['name'] + folder['parent_id']) not in [
+                f['name'] + f['parent_id'] for f in new_folders_filtered]:
+                new_folders_filtered.append(folder)
+
+        for folder in new_folders_filtered:
             ignore = False
             path = ''
 
@@ -157,6 +166,16 @@ class SyncLoop(Thread):
 
                 except self.Asset.DoesNotExist:
                     pass
+
+            # If folder has the same path/name as an existing one, ignore it
+            try:
+                self.Asset.get(self.Asset.path == path,
+                               self.Asset.project_id == project.project_id)
+                ignore = True
+                duplicates_folders += 1
+
+            except self.Asset.DoesNotExist:
+                pass
 
             self.Asset(name=folder['name'],
                        project_id=project.project_id,
@@ -207,6 +226,7 @@ class SyncLoop(Thread):
                 try:
                     self.Asset.get(self.Asset.path == asset_path,
                                    self.Asset.project_id == project.project_id)
+                    duplicates_files += 1
 
                 except self.Asset.DoesNotExist:
                     self.Asset(name=file['name'],
@@ -220,10 +240,10 @@ class SyncLoop(Thread):
                                on_frameio=True).save()
                 added_files += 1
 
-        if added_folders != 0:
-            logger.info('Added {} folders'.format(added_folders))
-        if added_files != 0:
-            logger.info('Added {} files'.format(added_files))
+        if added_folders - duplicates_folders != 0:
+            logger.info('Added {} folder(s)'.format(added_folders))
+        if added_files - duplicates_files != 0:
+            logger.info('Added {} file(s)'.format(added_files))
 
         if len(new_files) == added_files:  # All done. Moving up timestamp.
             project.last_frameio_scan = new_scan_timestamp
@@ -290,7 +310,7 @@ class SyncLoop(Thread):
                         except self.Asset.DoesNotExist:
                             logger.info('New file: {}'.format(name))
                             try:
-                                file_hash = xxhash_file(full_path)
+                                file_hash = calculate_hash(full_path)
                             except FileNotFoundError:
                                 all_assets_ready = False
                                 continue
