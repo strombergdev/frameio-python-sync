@@ -6,6 +6,8 @@
 
 ### Development Setup
 
+##### Requirements: Python 3.5-3.7 and npm.
+
 ##### Dev token login (only one login method required):
 1. Create a dev token at [developer.frame.io](https://developer.frame.io)
     - Required scopes: asset.read, asset.create, asset.delete, project.read, team.read, account.read
@@ -24,17 +26,18 @@
 ##### Setup/start server:
 1. Run `make install`
 2. Run `make api`
-3. Running on Localhost:
+3. To run frontend dynamically with VUE hot-reload for development:
     - In another shell environment, run `make web`
     - Go to [http://127.0.0.1:8080](http://127.0.0.1:8080)
    
-   Running on server:
-    - Build frontend with `make buildweb`
-    - Go to [http://SERVER_IP:5111](http://SERVER_IP:5111)    
+   To build frontend, when you just want to run without changing stuff:
+    - Run `make buildweb`
+    - Go to [http://127.0.0.1:5111](http://127.0.0.1:5111) or [http://SERVER_IP:5111](http://SERVER_IP:5111)    
     
 5. Login in the top right
 7. Choose what folders you want to sync!
 
+Bundled versions for Linux and Synology without needing python and npm available [here](https://gist.github.com/strombergdev/4315e58fd1897bc63a5b11669284e79c).
 
 ### Sync Policy
      
