@@ -7,11 +7,11 @@ Keep a local server synchronized with Frame.io.
 
 ##### Dev token login (only one login method required):
 1. Create a dev token at [developer.frame.io](https://developer.frame.io)
-    - Scopes required: project.read asset.create offline asset.read team.read account.read asset.delete
+    - Required scopes: project.read asset.create offline asset.read team.read account.read asset.delete
 
 ##### OAuth login:
 1. Create a PKCE OAuth app at [developer.frame.io](https://developer.frame.io)
-    - Scopes required: project.read asset.create offline asset.read team.read account.read asset.delete
+    - Required scopes: project.read asset.create offline asset.read team.read account.read asset.delete
     - Running on localhost:
         - Set Redirect URIs to http://127.0.0.1:8080
     - Running on server:  
