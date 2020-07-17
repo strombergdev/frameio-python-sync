@@ -1,8 +1,6 @@
 #!/bin/sh
 
 install:
-	# Install CircleCI tooling
-	curl -fLSs https://raw.githubusercontent.com/CircleCI-Public/circleci-cli/master/install.sh | bash
 	# Install python packages
 	cd server && pipenv install
 	# Install NPM dependencies
