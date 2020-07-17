@@ -157,6 +157,11 @@
         title="Dev token login"
         hide-footer
       >
+        <h6
+          style="margin-bottom: 15px;"
+        >
+          Required scopes: project.read asset.create offline
+          asset.read team.read account.read asset.delete</h6>
         <input
           id="devTokenInput"
           v-model="devToken"
@@ -256,6 +261,10 @@
       <h6
         style="margin-bottom: 15px;"
       >Add the name of the folder(s) you don't want synced</h6>
+      <h6
+        style="margin-bottom: 15px;"
+      >Wildcard * is supported, *renders* will ignore any folder
+        name containing the word renders.</h6>
       <form>
         <input
           id="folderInput"

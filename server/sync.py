@@ -1,3 +1,4 @@
+import fnmatch
 import mimetypes
 import os
 from threading import Thread
@@ -24,6 +25,14 @@ class SyncLoop(Thread):
                                  pragmas={'journal_mode': 'wal'})
         self.Project, self.Asset, self.IgnoreFolder = init_sync_models(
             self.db)[1:]
+
+    @staticmethod
+    def wildcard_match(name, ignore_list):
+        for ignore in ignore_list:
+            if fnmatch.fnmatch(name, ignore):
+                return True
+
+        return False
 
     def update_projects(self):
         """Get all projects from Frame.io and add new to DB."""
@@ -83,7 +92,8 @@ class SyncLoop(Thread):
             (self.Asset.parent_id == parent_id))
 
         for child in children:
-            if child.name in ignore_folders or ignore:
+            if child.name in ignore_folders or ignore or self.wildcard_match(
+                    child.name, ignore_folders):
                 ignore = True
 
             if child.path == '':
@@ -147,7 +157,8 @@ class SyncLoop(Thread):
             ignore = False
             path = ''
 
-            if folder['name'] in ignore_folders:
+            if folder['name'] in ignore_folders or self.wildcard_match(
+                    folder['name'], ignore_folders):
                 ignore = True
 
             if folder['parent_id'] == project.root_asset_id:
@@ -241,9 +252,11 @@ class SyncLoop(Thread):
                 added_files += 1
 
         if added_folders - duplicates_folders != 0:
-            logger.info('Added {} folder(s)'.format(added_folders))
+            logger.info('Added {} folder(s)'.format(
+                added_folders - duplicates_folders))
         if added_files - duplicates_files != 0:
-            logger.info('Added {} file(s)'.format(added_files))
+            logger.info(
+                'Added {} file(s)'.format(added_files - duplicates_files))
 
         if len(new_files) == added_files:  # All done. Moving up timestamp.
             project.last_frameio_scan = new_scan_timestamp
@@ -273,7 +286,8 @@ class SyncLoop(Thread):
 
         for root, dirs, files in os.walk(abs_project_path, topdown=True):
             dirs[:] = [d for d in dirs if
-                       d not in ignore_folders and not d.startswith(".")]
+                       d not in ignore_folders and not d.startswith(
+                           ".") and not self.wildcard_match(d, ignore_folders)]
 
             for name in files:
                 full_path = os.path.join(root, name)
@@ -390,8 +404,7 @@ class SyncLoop(Thread):
                 file.delete_instance()
                 continue
 
-            checksums = asset['checksums']
-            if checksums is None:
+            if asset['checksums'] is None:
                 logger.info('No checksum for {}'.format(file.name))
 
                 # Allow Frame.io some time to calculate hash, retry next loop
@@ -405,14 +418,12 @@ class SyncLoop(Thread):
                                            os.path.dirname(file.path))
 
             if os.path.isdir(download_folder):
-                logger.info('Downloading: {} at {}'.format(file.path, time()))
+                logger.info('Downloading: {}'.format(file.path))
 
                 try:
-                    authenticated_client().download(
-                        asset={"name": file.name, "original": file.original,
-                               "checksums": checksums},
-                        download_folder=download_folder,
-                        replace=False)
+                    authenticated_client().download(asset,
+                                                    download_folder=download_folder,
+                                                    replace=False)
 
                 except FileExistsError:
                     logger.info('{} already exists.'.format(file.path))
@@ -671,7 +682,8 @@ class SyncLoop(Thread):
                 asset.save()
 
             if not asset.is_file:
-                if asset.name not in ignore_folders:
+                if asset.name not in ignore_folders and not self.wildcard_match(
+                        asset.name, ignore_folders):
                     asset.ignore = False
                     asset.save()
                     children = self.Asset.select().where(
@@ -679,14 +691,13 @@ class SyncLoop(Thread):
                     self.remove_ignore_flag(children, ignore_folders)
 
     def update_ignored_assets(self):
-        """Find ignore folders that have been removed and make sure previously
-        blocked assets are synced.
+        """Find changes to ignore folders and un-flag blocked assets.
 
         Frame.io assets are added to DB even if they match an ignore folder.
-        Removing the ignore flag and download_new_assets will pick them up.
+        Remove the ignore flag, and download_new_assets will pick them up.
 
         Local assets are not added to DB if they match an ignore folder, just
-        skipped by update_local_assets. Reset last_scan will add/upload them.
+        skipped. Reset last_scan will add/upload them.
         """
         removed_ignore_folders = self.IgnoreFolder.select().where(
             self.IgnoreFolder.removed == True)
@@ -695,15 +706,19 @@ class SyncLoop(Thread):
                                  self.IgnoreFolder.select().where(
                                      self.IgnoreFolder.removed == False)]
 
-        for folder in removed_ignore_folders:
-            logger.info('Removing ignore folder {}'.format(folder.name))
+        all_blocked_folders = self.Asset.select().where(
+            (self.Asset.ignore == True) &
+            (self.Asset.is_file == False))
 
-            assets = self.Asset.select().where(
-                (self.Asset.name == folder.name) &
-                (self.Asset.is_file == False))
+        for ignore_folder in removed_ignore_folders:
+            logger.info('Removing ignore folder {}'.format(ignore_folder.name))
 
-            self.remove_ignore_flag(assets, active_ignore_folders)
-            folder.delete_instance()
+            blocked_folders = [f for f in all_blocked_folders if
+                               f.name == ignore_folder.name or self.wildcard_match(
+                                   f.name, [ignore_folder.name])]
+
+            self.remove_ignore_flag(blocked_folders, active_ignore_folders)
+            ignore_folder.delete_instance()
 
         for project in self.Project.select():  # Trigger re-scan of all
             project.last_local_scan = 0
