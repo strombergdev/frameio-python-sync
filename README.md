@@ -7,6 +7,7 @@
 ### Development Setup
 
 ##### Requirements: Python 3.5-3.7 and npm.
+Bundled versions for Linux and Synology without needing python and npm available [here](https://gist.github.com/strombergdev/4315e58fd1897bc63a5b11669284e79c).
 
 ##### Dev token login (only one login method required):
 1. Create a dev token at [developer.frame.io](https://developer.frame.io)
@@ -37,7 +38,6 @@
 5. Login in the top right
 7. Choose what folders you want to sync!
 
-Bundled versions for Linux and Synology without needing python and npm available [here](https://gist.github.com/strombergdev/4315e58fd1897bc63a5b11669284e79c).
 
 ### Sync Policy
      
