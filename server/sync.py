@@ -112,9 +112,6 @@ class SyncLoop(Thread):
         project (DB Project)
         ignore_folders (List)
         """
-        logger.info('Scanning {} for new Frame.io assets'.format(
-            project.name))
-
         # Always overscan by 10 minutes to help avoid missing assets.
         new_scan_timestamp = (
                 datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
@@ -252,11 +249,11 @@ class SyncLoop(Thread):
                 added_files += 1
 
         if added_folders - duplicates_folders != 0:
-            logger.info('Added {} folder(s)'.format(
-                added_folders - duplicates_folders))
+            logger.info(
+                'New folders on Frame.io for project {}'.format(project.name))
         if added_files - duplicates_files != 0:
             logger.info(
-                'Added {} file(s)'.format(added_files - duplicates_files))
+                'New files on Frame.io for project {}'.format(project.name))
 
         if len(new_files) == added_files:  # All done. Moving up timestamp.
             project.last_frameio_scan = new_scan_timestamp
@@ -278,11 +275,10 @@ class SyncLoop(Thread):
             self.delete_db_project(project)
             return
 
-        logger.info('Scanning {} for new local assets'.format(
-            project.name))
-
         new_scan_time = int(time()) - 500  # Overscan to avoid missing assets.
         all_assets_ready = True
+        new_folders = False
+        new_files = False
 
         for root, dirs, files in os.walk(abs_project_path, topdown=True):
             dirs[:] = [d for d in dirs if
@@ -322,13 +318,13 @@ class SyncLoop(Thread):
 
                         # New file
                         except self.Asset.DoesNotExist:
-                            logger.info('New file: {}'.format(name))
                             try:
                                 file_hash = calculate_hash(full_path)
                             except FileNotFoundError:
                                 all_assets_ready = False
                                 continue
 
+                            new_files = True
                             self.Asset(name=name,
                                        project_id=project.project_id,
                                        path=path,
@@ -358,6 +354,7 @@ class SyncLoop(Thread):
                             db_asset.save()
 
                     except self.Asset.DoesNotExist:
+                        new_folders = True
                         self.Asset(name=name,
                                    project_id=project.project_id,
                                    on_local_storage=True,
@@ -366,6 +363,13 @@ class SyncLoop(Thread):
         if all_assets_ready:
             project.last_local_scan = new_scan_time
             project.save()
+
+        if new_folders:
+            logger.info(
+                'New local folders for project {}'.format(project.name))
+        if new_files:
+            logger.info(
+                'New local files for project {}'.format(project.name))
 
     def download_new_assets(self, project):
         """Get new assets from DB and download them"""
@@ -728,6 +732,7 @@ class SyncLoop(Thread):
         while True:
             if authenticated_client():
                 try:
+                    logger.info('Checking for updates')
                     if self.db.is_closed():
                         self.db.connect()
 
@@ -770,6 +775,4 @@ class SyncLoop(Thread):
                     self.update_ignored_assets()
 
                 self.db.close()
-                logger.info(
-                    'Sleeping for {} secs'.format(config.SCAN_INTERVAL))
             sleep(config.SCAN_INTERVAL)

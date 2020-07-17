@@ -12,8 +12,11 @@ from time import time
 from logger import logger, handle_exception, PurgeOldLogMessages
 import sys
 import threading
+import logging
 
 app = Flask(__name__, static_url_path='', static_folder='client_dist')
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
 CORS(app, resources={r'/*': {'origins': '*'}})
 
 AUTHORIZE_URL = "https://applications.frame.io/oauth2/auth"
@@ -358,7 +361,7 @@ def update_ignore_folders():
 def latest_log_messages():
     messages = [{"text": log.text, "created_at": log.created_at} for log in
                 LogMessage.select().order_by(
-                    LogMessage.created_at.desc()).limit(500)]
+                    LogMessage.created_at.desc()).limit(800)]
 
     messages.sort(key=lambda m: m['created_at'])
     messages[:] = [m['text'] for m in messages]

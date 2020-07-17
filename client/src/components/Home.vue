@@ -194,7 +194,7 @@
           :data-key="'id'"
           :data-sources="latestLogs"
           :data-component="itemComponent"
-          :estimate-size="500"
+          :estimate-size="800"
           :item-class="'list-item-fixed'"
         />
         <button
@@ -531,6 +531,7 @@ export default {
       this.selectedTeam = event.target.value;
       this.getProjects(this.selectedTeam);
       localStorage.team = this.selectedTeam;
+      window.location.replace('/');
     },
     async logout() {
       const res = await axios({ url: `${backendURL}:${backendPort}/api/logout`, method: 'post' });
