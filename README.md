@@ -3,6 +3,9 @@
 Keep a local server synchronized with Frame.io.
 
 
+![Screenshot 2020-07-17 at 13 26 11](https://user-images.githubusercontent.com/63540107/87785797-176e0a00-c839-11ea-9987-f368c7494725.png)
+
+
 ### Development Setup
 
 ##### Dev token login (only one login method required):
