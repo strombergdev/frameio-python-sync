@@ -160,8 +160,8 @@
         <h6
           style="margin-bottom: 15px;"
         >
-          Required scopes: project.read asset.create offline
-          asset.read team.read account.read asset.delete</h6>
+          Required scopes: asset.read, asset.create, asset.delete,
+          project.read, team.read, account.read</h6>
         <input
           id="devTokenInput"
           v-model="devToken"

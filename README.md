@@ -8,11 +8,12 @@
 
 ##### Dev token login (only one login method required):
 1. Create a dev token at [developer.frame.io](https://developer.frame.io)
-    - Required scopes: project.read asset.create offline asset.read team.read account.read asset.delete
+    - Required scopes: asset.read, asset.create, asset.delete, project.read, team.read, account.read
+
 
 ##### OAuth login:
 1. Create a PKCE OAuth app at [developer.frame.io](https://developer.frame.io)
-    - Required scopes: project.read asset.create offline asset.read team.read account.read asset.delete
+    - Required scopes: offline, asset.read, asset.create, asset.delete, project.read, team.read, account.read
     - Running on localhost:
         - Set Redirect URIs to http://127.0.0.1:8080
     - Running on server:  
