@@ -1,4 +1,4 @@
-### Keep a local server synchronized with Frame.io.
+### Synchronize a server with Frame.io.
 
 
 ![Screenshot 2020-07-17 at 13 26 11](https://user-images.githubusercontent.com/63540107/87785797-176e0a00-c839-11ea-9987-f368c7494725.png)
@@ -26,17 +26,18 @@ Bundled versions for Linux and Synology without needing python and npm available
 
 ##### Setup/start server:
 1. Run `make install`
-2. Run `make api`
-3. To run frontend dynamically with VUE hot-reload for development:
+2. To run frontend dynamically with VUE hot-reload for development:
+    - Run `make api`
     - In another shell environment, run `make web`
     - Go to [http://127.0.0.1:8080](http://127.0.0.1:8080)
    
    To build frontend, when you just want to run without changing stuff:
     - Run `make buildweb`
-    - Go to [http://127.0.0.1:5111](http://127.0.0.1:5111) or [http://SERVER_IP:5111](http://SERVER_IP:5111)    
-    
-5. Login in the top right
-7. Choose what folders you want to sync!
+    - Run `make api`    
+    - Go to [http://127.0.0.1:5111](http://127.0.0.1:5111) or [http://SERVER_IP:5111](http://SERVER_IP:5111)
+   
+4. Login in the top right
+5. Choose what folders you want to sync!
 
 
 ### Sync Policy
