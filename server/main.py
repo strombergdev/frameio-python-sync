@@ -14,9 +14,12 @@ import sys
 import threading
 import logging
 
+
 app = Flask(__name__, static_url_path='', static_folder='client_dist')
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
+cli = sys.modules['flask.cli']  # Hide WSGI warning
+cli.show_server_banner = lambda *x: None
 CORS(app, resources={r'/*': {'origins': '*'}})
 
 AUTHORIZE_URL = "https://applications.frame.io/oauth2/auth"
@@ -383,6 +386,9 @@ def home():
 
 
 if __name__ == '__main__':
+    print('Starting Frame.io sync')
+    print('Connect on port 8080 or 5111 depending on your setup')
+
     authenticated_client()  # Trigger token refresh
 
     # Start logging cleanup thread
@@ -394,4 +400,4 @@ if __name__ == '__main__':
     loop = sync.SyncLoop()
     loop.start()
 
-    app.run(port=5111)
+    app.run(host='0.0.0.0', port=5111)
