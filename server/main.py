@@ -251,8 +251,12 @@ def all_projects(team_id):
 @app.route('/api/projects/<project_id>', methods=['PUT', 'POST'])
 def update_project(project_id):
     """Update selected project in DB."""
+    try:
+        project = Project.get(Project.project_id == project_id)
+    except Project.DoesNotExist:
+        return Response('Bad request', status=400)
+
     req = request.get_json()
-    project = Project.get(Project.project_id == project_id)
 
     if req.get('sync') is not None:
         if req['sync'] is False:
