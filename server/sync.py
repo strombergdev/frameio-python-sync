@@ -117,7 +117,7 @@ class SyncLoop(Thread):
                 datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
 
         try:
-            account_id = authenticated_client().get_me()['account_id']
+            account_id = authenticated_client().get_project(project.project_id)['root_asset']['account_id']
             updated_assets = authenticated_client().get_updated_assets(
                 account_id, project.project_id, project.last_frameio_scan)
 
