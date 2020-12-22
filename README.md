@@ -4,10 +4,9 @@
 ![Screenshot 2020-07-17 at 13 26 11](https://user-images.githubusercontent.com/63540107/87785797-176e0a00-c839-11ea-9987-f368c7494725.png)
 
 
-### Development Setup
+### Setup
 
 ##### Requirements: Python 3.5-3.7 and npm.
-Bundled versions for Linux and Synology without needing python and npm available [here](https://gist.github.com/strombergdev/4315e58fd1897bc63a5b11669284e79c).
 
 ##### Dev token login (only one login method required):
 1. Create a dev token at [developer.frame.io](https://developer.frame.io)
