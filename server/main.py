@@ -276,6 +276,7 @@ def update_project(project_id):
 
     if req.get('local_path') is not None:
         abs_path = os.path.abspath(req['local_path'])
+        previous_path = project.local_path
 
         if os.access(abs_path, os.W_OK):
             if req.get('sub_folder') != "":
@@ -289,6 +290,10 @@ def update_project(project_id):
             logger.info(
                 'Local path change to {} for {}'.format(project.local_path,
                                                         project.name))
+
+            if previous_path != '' and previous_path != project.local_path:
+                project.local_path_changed = True
+
             project.save()
             sync_db.close()
             return Response(status=200)

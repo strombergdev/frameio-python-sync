@@ -36,6 +36,7 @@ def init_sync_models(db):
         root_asset_id = CharField(default='')
         team_id = CharField(default='')
         local_path = CharField(default='')
+        local_path_changed = BooleanField(default=False)
 
         sync = BooleanField(default=False)
         last_frameio_scan = CharField(

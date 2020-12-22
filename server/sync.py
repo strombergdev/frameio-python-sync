@@ -679,6 +679,12 @@ class SyncLoop(Thread):
 
         project.delete_instance()
 
+    def delete_assets_from_db(self, project):
+        """Delete all assets from DB."""
+        for asset in self.Asset.select().where(
+                self.Asset.project_id == project.project_id):
+            asset.delete_instance()
+
     def remove_ignore_flag(self, assets, ignore_folders):
         for asset in assets:
             if asset.is_file:
@@ -768,6 +774,17 @@ class SyncLoop(Thread):
                 for project in self.Project.select().where(
                         self.Project.db_delete_requested == True):
                     self.delete_db_project(project)
+
+                # Delete assets to redo sync from scratch if path has been changed.
+                for project in self.Project.select().where(
+                        self.Project.local_path_changed == True):
+                    logger.info('Path changed, deleting and recreating assets in db')
+
+                    self.delete_assets_from_db(project)
+                    project.local_path_changed = False
+                    project.last_local_scan = 0
+                    project.last_frameio_scan = '2014-02-07T00:00:01.000000+00:00'
+                    project.save()
 
                 # Updated ignored assets if an ignore folder has been removed.
                 if self.IgnoreFolder.select().where(
