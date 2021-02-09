@@ -631,14 +631,10 @@ class SyncLoop(Thread):
                 frameio_asset = authenticated_client().get_asset(
                     asset.asset_id)
             except requests.exceptions.HTTPError:
-                # Asset no longer available on Frame.io to verify
-                # Delete from DB and rescan project to try again.
-                project.last_frameio_scan = (
-                        datetime.now(timezone.utc)
-                        - timedelta(days=1)).isoformat()
-                project.save()
-                asset.delete_instance()
-                return
+                logger.info('Asset deleted from Frame.io, skipping')
+                asset.upload_verified = True
+                asset.save()
+                continue
 
             if frameio_asset.get('upload_completed_at') is None:
                 logger.info('Upload failed')
