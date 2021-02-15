@@ -48,7 +48,10 @@ class PaginatedResponse(object):
       if self.asset_index < self.page_size and self.returned < self.total:
         self.asset_index += 1
         self.returned += 1
-        return self.results[self.asset_index - 1]
+        try:
+          return self.results[self.asset_index - 1]
+        except IndexError:
+          raise StopIteration
 
       if self.current_page < self.total_pages:
         self.current_page += 1
