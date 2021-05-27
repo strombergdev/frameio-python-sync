@@ -4,6 +4,16 @@
 ![Screenshot 2020-07-17 at 13 26 11](https://user-images.githubusercontent.com/63540107/87785797-176e0a00-c839-11ea-9987-f368c7494725.png)
 
 
+### Running with Docker
+
+This is the command you'll run, making sure to put your CLIENT_ID in. It's possible to do this a `.env` file as well. 
+
+One important thing to call out is that you will have to make sure you're mounting the correct volume to your container.
+
+```sh
+CLIENT_ID='<YOUR CLIENT ID>' docker run -it -v $PWD/data:/app/server/db -p 5111:5111 fio-sync:latest
+```
+
 ### Setup
 
 ##### Requirements: Python 3.5-3.7 and npm.
