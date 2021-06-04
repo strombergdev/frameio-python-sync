@@ -11,6 +11,9 @@ jobs:
     - name: Publish to Registry
       uses: elgohr/Publish-Docker-Github-Action@master
       with:
-        name: strombergdev/fio-sync:latest
+        name: strombergdev/frameio-python-sync/fio-sync
+        username: ${{ github.actor }}
+        password: ${{ github.password }}
+        registry: docker.pkg.github.com
 #         username: ${{ secrets.DOCKER_USERNAME }}
 #         password: ${{ secrets.DOCKER_PASSWORD }}
