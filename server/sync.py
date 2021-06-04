@@ -1,20 +1,20 @@
 import fnmatch
 import mimetypes
 import os
+from datetime import datetime, timedelta, timezone
 from threading import Thread
-from time import sleep
-from time import time
-from datetime import datetime, timezone, timedelta
-from dateutil import parser
+from time import sleep, time
 
 import requests
+from dateutil import parser
 from peewee import SqliteDatabase
+from requests import auth
 
 import config
 from db_models import init_sync_models
+from frameioclient.utils import calculate_hash
 from logger import logger
 from main import authenticated_client
-from frameioclient.utils import calculate_hash
 
 
 class SyncLoop(Thread):
@@ -39,10 +39,17 @@ class SyncLoop(Thread):
         projects = []
         try:
             for team in authenticated_client().get_all_teams():
+                # print(f"{team['name']}: {team['id']}")
                 projects += authenticated_client().get_projects(team['id'])
         except (requests.exceptions.ConnectionError,
                 requests.exceptions.HTTPError):
             raise
+
+        # try:
+        #     projects += authenticated_client().get_shared_projects() # could take a while to run
+        # except (requests.exceptions.ConnectionError,
+        #         requests.exceptions.HTTPError):
+        #     raise
 
         for project in projects:
             try:

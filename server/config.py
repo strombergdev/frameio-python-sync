@@ -7,7 +7,8 @@ CONSOLE_LOG = True
 SCAN_INTERVAL = 60
 
 # OAuth login
-CLIENT_ID = os.getenv('CLIENT_ID')
+# Default CLIENT_ID configured by jhodges@frame.io
+CLIENT_ID = os.getenv('CLIENT_ID', '8a1f7f3e-a016-486a-949b-8b0fc17cf214')
 REDIRECT_URL = 'http://127.0.0.1:8080'
 SCOPES = 'project.read asset.create offline asset.read team.read account.read asset.delete'
 
