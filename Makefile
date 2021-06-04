@@ -17,3 +17,11 @@ web:
 buildweb:
 	# Build  Vue app and copy into server dir
 	cd client && npm run build
+
+build-docker:
+	# Build the Docker container
+	docker build . -t fio-sync:latest
+
+run-docker:
+	# Run the Docker container
+	CLIENT_ID='<YOUR CLIENT ID>' docker run -it -v $PWD/data:/app/server/db -p 5111:5111 fio-sync:latest
