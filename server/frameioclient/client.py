@@ -1,7 +1,9 @@
 import sys
+
 import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
+
 from .download import FrameioDownloader
 
 if sys.version_info.major >= 3:
@@ -200,7 +202,14 @@ class FrameioClient(object):
     """
     endpoint = '/teams/{}/projects'.format(team_id)
     return self._api_call('get', endpoint, kwargs)
-  
+
+  def get_shared_projects(self, **kwargs):
+    """
+    Get projects the user is a collaborator on.
+    """
+    endpoint = '/projects/shared'
+    return self._api_call('get', endpoint, kwargs)
+
   def get_project(self, project_id):
     """
     Get an individual project
