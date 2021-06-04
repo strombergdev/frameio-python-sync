@@ -24,4 +24,4 @@ build-docker:
 
 run-docker:
 	# Run the Docker container
-	CLIENT_ID='<YOUR CLIENT ID>' docker run -it -v $PWD/data:/app/server/db -p 5111:5111 fio-sync:latest
+	docker run -it -v $(PWD)/data:/app/server/db -v /Users/jeff/Sync:/app/mount -p 5111:5111 fio-sync:latest
