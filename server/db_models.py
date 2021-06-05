@@ -1,4 +1,5 @@
-from peewee import Model, CharField, IntegerField, BooleanField
+from peewee import BooleanField, CharField, IntegerField, Model
+
 from config import SYSTEM_FOLDERS
 
 
@@ -25,22 +26,21 @@ def init_sync_models(db):
             database = db
 
     class Login(BaseModel):
-        token = CharField(default='')
+        token = CharField(default="")
         token_expires = IntegerField(default=0)
-        refresh_token = CharField(default='')
-        type = CharField(default='OAuth')
+        refresh_token = CharField(default="")
+        type = CharField(default="OAuth")
 
     class Project(BaseModel):
         name = CharField()
-        project_id = CharField(default='')
-        root_asset_id = CharField(default='')
-        team_id = CharField(default='')
-        local_path = CharField(default='')
+        project_id = CharField(default="")
+        root_asset_id = CharField(default="")
+        team_id = CharField(default="")
+        local_path = CharField(default="")
         local_path_changed = BooleanField(default=False)
 
         sync = BooleanField(default=False)
-        last_frameio_scan = CharField(
-            default='2014-02-07T00:00:01.000000+00:00')
+        last_frameio_scan = CharField(default="2014-02-07T00:00:01.000000+00:00")
         last_local_scan = IntegerField(default=0)
         deleted_from_frameio = BooleanField(default=False)
         db_delete_requested = BooleanField(default=False)
@@ -49,16 +49,16 @@ def init_sync_models(db):
         name = CharField()
         path = CharField()  # relative to project root
         is_file = BooleanField(default=False)
-        asset_id = CharField(default='')
-        parent_id = CharField(default='')
+        asset_id = CharField(default="")
+        parent_id = CharField(default="")
         project_id = CharField()
-        original = CharField(default='')
+        original = CharField(default="")
 
         ignore = BooleanField(default=False)
         on_frameio = BooleanField(default=False)
         on_local_storage = BooleanField(default=False)
-        local_xxhash = CharField(default='')
-        frameio_xxhash = CharField(default='')
+        local_xxhash = CharField(default="")
+        frameio_xxhash = CharField(default="")
 
         uploaded_at = IntegerField(default=0)
         upload_verified = BooleanField(default=True)
@@ -81,6 +81,6 @@ def init_sync_models(db):
     ignore = IgnoreFolder.get_or_none()
     if ignore is None:
         for folder in SYSTEM_FOLDERS:
-            IgnoreFolder(name=folder, type='SYSTEM').save()
+            IgnoreFolder(name=folder, type="SYSTEM").save()
 
     return Login, Project, Asset, IgnoreFolder

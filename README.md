@@ -26,7 +26,15 @@ docker run -it -v $PWD/data:/app/server/db -v /Users/jeff/Sync:/app/mount -p 511
 
 ### Setup
 
-##### Requirements: Python 3.5-3.7 and npm.
+##### Requirements: Python 3.5-3.9 and npm.
+We recently upgraded to the latest version of Python, `3.9.5`, if you don't have it - you'll have a hard time installing the dependencies.
+
+To get Python 3.9.5 we recommend the following:
+
+1. Install `pyenv` using `brew`: `brew install pyenv`.
+2. Install Python 3.9.5 using `pyenv install 3.9.5`. 
+
+Then everything else will work!
 
 ##### Dev token login (only one login method required):
 1. Create a dev token at [developer.frame.io](https://developer.frame.io)
