@@ -1,36 +1,39 @@
+import logging
 import os
-import config
-import frameioclient
-from flask import Flask, jsonify, request, Response
-from flask_cors import CORS, cross_origin
-import requests
-import requests.auth
-import sync
-from db_models import init_sync_models, init_log_model
-from peewee import SqliteDatabase
-from time import time
-from logger import logger, handle_exception, PurgeOldLogMessages
 import sys
 import threading
-import logging
+from time import time
 
+import requests
+import requests.auth
+from flask import Flask, Response, jsonify, request
+from flask_cors import CORS, cross_origin
+from peewee import SqliteDatabase
 
-app = Flask(__name__, static_url_path='', static_folder='client_dist')
-log = logging.getLogger('werkzeug')
+import config
+import frameioclient
+import sync
+from db_models import init_log_model, init_sync_models
+from logger import PurgeOldLogMessages, handle_exception, logger
+
+app = Flask(__name__, static_url_path="", static_folder="client_dist")
+log = logging.getLogger("werkzeug")
 log.setLevel(logging.ERROR)
-cli = sys.modules['flask.cli']  # Hide WSGI warning
+cli = sys.modules["flask.cli"]  # Hide WSGI warning
 cli.show_server_banner = lambda *x: None
-CORS(app, resources={r'/*': {'origins': '*'}})
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 AUTHORIZE_URL = "https://applications.frame.io/oauth2/auth"
 TOKEN_URL = "https://applications.frame.io/oauth2/token"
 
-sync_db = SqliteDatabase(os.path.join(config.DB_FOLDER, 'sync.db'),
-                         pragmas={'journal_mode': 'wal'})
+sync_db = SqliteDatabase(
+    os.path.join(config.DB_FOLDER, "sync.db"), pragmas={"journal_mode": "wal"}
+)
 Login, Project, Asset, IgnoreFolder = init_sync_models(sync_db)
 
-log_db = SqliteDatabase(os.path.join(config.DB_FOLDER, 'log.db'),
-                        pragmas={'journal_mode': 'wal'})
+log_db = SqliteDatabase(
+    os.path.join(config.DB_FOLDER, "log.db"), pragmas={"journal_mode": "wal"}
+)
 LogMessage = init_log_model(log_db)
 
 sys.excepthook = handle_exception
@@ -63,31 +66,31 @@ def setup_thread_excepthook():
 
 def authenticated_client():
     """Return authenticated frame.io client either from cache or refresh"""
-    if config.client_expires == 'NEVER':
+    if config.client_expires == "NEVER":
         return config.authenticated_client
     if config.client_expires > time():
         return config.authenticated_client
 
     login = Login.select().limit(1).get()
-    if login.token == '':  # Not logged in
-        logger.info('Not logged in')
+    if login.token == "":  # Not logged in
+        logger.info("Not logged in")
         sync_db.close()
         return False
 
-    if login.type == 'DEVTOKEN':
-        logger.info('Dev token login found')
+    if login.type == "DEVTOKEN":
+        logger.info("Dev token login found")
         config.authenticated_client = frameioclient.FrameioClient(login.token)
-        config.client_expires = 'NEVER'
+        config.client_expires = "NEVER"
 
         sync_db.close()
         return config.authenticated_client
 
-    logger.info('Refreshing OAuth token')
+    logger.info("Refreshing OAuth token")
     tokens = refresh_token(login.refresh_token)
     if tokens:
-        tokens['type'] = 'OAUTH'
+        tokens["type"] = "OAUTH"
         save_tokens(tokens)
-        token = tokens['access_token']
+        token = tokens["access_token"]
         config.authenticated_client = frameioclient.FrameioClient(token)
         config.client_expires = time() + 3300  # 5min padding for safety
 
@@ -96,7 +99,7 @@ def authenticated_client():
         logger.info("Couldn't refresh token, signing out")
 
         login = Login.select().limit(1).get()
-        login.token = ''
+        login.token = ""
         login.save()
         return False
 
@@ -110,11 +113,11 @@ def save_tokens(tokens):
     """Save tokens to DB."""
     login = Login.select().limit(1).get()
 
-    login.token = tokens['access_token']
-    login.refresh_token = tokens['refresh_token']
-    login.type = tokens['type']
-    if tokens['type'] == 'DEVTOKEN':
-        login.token_expires = 'NEVER'
+    login.token = tokens["access_token"]
+    login.refresh_token = tokens["refresh_token"]
+    login.type = tokens["type"]
+    if tokens["type"] == "DEVTOKEN":
+        login.token_expires = "NEVER"
     else:
         login.token_expires = time() + 3300  # 5min padding for safety
 
@@ -128,7 +131,7 @@ def refresh_token(token):
         "grant_type": "refresh_token",
         "scope": config.SCOPES,
         "refresh_token": token,
-        "client_id": config.CLIENT_ID
+        "client_id": config.CLIENT_ID,
     }
 
     response = requests.post(TOKEN_URL, data=post_data)
@@ -137,7 +140,7 @@ def refresh_token(token):
     return False
 
 
-@app.route('/api/loginstatus', methods=['GET'])
+@app.route("/api/loginstatus", methods=["GET"])
 def login_status():
     """Check Frame.io login status and return it."""
     if authenticated_client():
@@ -145,39 +148,39 @@ def login_status():
     return jsonify(logged_in=False)
 
 
-@app.route('/api/logindata', methods=['GET'])
+@app.route("/api/logindata", methods=["GET"])
 def login_data():
     """Return parameters needed to begin OAuth login."""
-    return jsonify(client_id=config.CLIENT_ID, scopes=config.SCOPES,
-                   redirect_url=config.REDIRECT_URL)
+    return jsonify(
+        client_id=config.CLIENT_ID,
+        scopes=config.SCOPES,
+        redirect_url=config.REDIRECT_URL,
+    )
 
 
-@app.route('/api/devtokenlogin', methods=['POST'])
-@cross_origin(headers=['Content-Type'])
+@app.route("/api/devtokenlogin", methods=["POST"])
+@cross_origin(headers=["Content-Type"])
 def devtoken_login():
     """Login with dev token."""
     req = request.get_json()
-    token = req['token']
-    tokens = {'access_token': token,
-              'refresh_token': 'None',
-              'type': 'DEVTOKEN'}
+    token = req["token"]
+    tokens = {"access_token": token, "refresh_token": "None", "type": "DEVTOKEN"}
 
     save_tokens(tokens)
-    config.authenticated_client = frameioclient.FrameioClient(
-        tokens['access_token'])
-    config.client_expires = 'NEVER'
+    config.authenticated_client = frameioclient.FrameioClient(tokens["access_token"])
+    config.client_expires = "NEVER"
 
-    logger.info('Logged in with dev token')
+    logger.info("Logged in with dev token")
     return Response(status=200)
 
 
-@app.route('/api/tokenexchange', methods=['POST'])
-@cross_origin(headers=['Content-Type'])
+@app.route("/api/tokenexchange", methods=["POST"])
+@cross_origin(headers=["Content-Type"])
 def token_exchange():
     """Exchange code for token and save it to DB."""
     req = request.get_json()
-    code = req['code']
-    state = req['state']
+    code = req["code"]
+    state = req["state"]
 
     post_data = {
         "grant_type": "authorization_code",
@@ -185,22 +188,21 @@ def token_exchange():
         "redirect_uri": config.REDIRECT_URL,
         "state": state,
         "scope": config.SCOPES,
-        "client_id": config.CLIENT_ID
+        "client_id": config.CLIENT_ID,
     }
 
     response = requests.post(TOKEN_URL, data=post_data)
     tokens = response.json()
-    tokens['type'] = 'OAUTH'
+    tokens["type"] = "OAUTH"
     save_tokens(tokens)
-    config.authenticated_client = frameioclient.FrameioClient(
-        tokens['access_token'])
+    config.authenticated_client = frameioclient.FrameioClient(tokens["access_token"])
     config.client_expires = time() + 3300  # 5min padding for safety
 
-    logger.info('Logged in with OAuth')
+    logger.info("Logged in with OAuth")
     return Response(status=200)
 
 
-@app.route('/api/logout', methods=['POST'])
+@app.route("/api/logout", methods=["POST"])
 def logout():
     """Logout of Frame.io and clear database."""
     config.authenticated_client = None
@@ -218,7 +220,7 @@ def logout():
     return Response(status=200)
 
 
-@app.route('/api/teams', methods=['GET'])
+@app.route("/api/teams", methods=["GET"])
 def get_teams():
     """Get users teams from Frame.io."""
     if authenticated_client():
@@ -226,82 +228,87 @@ def get_teams():
     return jsonify([])
 
 
-@app.route('/api/<team_id>/projects', methods=['GET'])
+@app.route("/api/<team_id>/projects", methods=["GET"])
 def all_projects(team_id):
     """Get projects from DB and return them."""
     project_list = []
     projects = Project.select().where(Project.team_id == team_id)
 
     for project in projects:
-        if project.local_path == '':
-            project_path = 'Not set'
+        if project.local_path == "":
+            project_path = "Not set"
         else:
             project_path = project.local_path
 
-        project_list.append({
-            'id': project.project_id,
-            'name': project.name,
-            'sync': project.sync,
-            'local_path': project_path,
-            'deleted': project.deleted_from_frameio,
-            'db_delete_requested': project.db_delete_requested})
+        project_list.append(
+            {
+                "id": project.project_id,
+                "name": project.name,
+                "sync": project.sync,
+                "local_path": project_path,
+                "deleted": project.deleted_from_frameio,
+                "db_delete_requested": project.db_delete_requested,
+            }
+        )
 
     sync_db.close()
     return jsonify(project_list)
 
 
-@cross_origin(headers=['Content-Type'])
-@app.route('/api/projects/<project_id>', methods=['PUT', 'POST'])
+@cross_origin(headers=["Content-Type"])
+@app.route("/api/projects/<project_id>", methods=["PUT", "POST"])
 def update_project(project_id):
     """Update selected project in DB."""
     try:
         project = Project.get(Project.project_id == project_id)
     except Project.DoesNotExist:
-        return Response('Bad request', status=400)
+        return Response("Bad request", status=400)
 
     req = request.get_json()
 
-    if req.get('sync') is not None:
-        if req['sync'] is False:
-            logger.info('Sync changed to FALSE for {}'.format(project.name))
+    if req.get("sync") is not None:
+        if req["sync"] is False:
+            logger.info("Sync changed to FALSE for {}".format(project.name))
             project.sync = False
             project.save()
         else:
-            logger.info('Sync changed to TRUE for {}'.format(project.name))
+            logger.info("Sync changed to TRUE for {}".format(project.name))
             project.sync = True
             project.save()
 
         sync_db.close()
         return Response(status=200)
 
-    if req.get('local_path') is not None:
-        abs_path = os.path.abspath(req['local_path'])
+    if req.get("local_path") is not None:
+        abs_path = os.path.abspath(req["local_path"])
         previous_path = project.local_path
 
         if os.access(abs_path, os.W_OK):
-            if req.get('sub_folder') != "":
-                os.makedirs(os.path.join(
-                    abs_path, req.get('sub_folder')), exist_ok=True)
-                project.local_path = os.path.join(abs_path,
-                                                  req.get('sub_folder'))
+            if req.get("sub_folder") != "":
+                os.makedirs(
+                    os.path.join(abs_path, req.get("sub_folder")), exist_ok=True
+                )
+                project.local_path = os.path.join(abs_path, req.get("sub_folder"))
             else:
                 project.local_path = abs_path
 
             logger.info(
-                'Local path change to {} for {}'.format(project.local_path,
-                                                        project.name))
+                "Local path change to {} for {}".format(
+                    project.local_path, project.name
+                )
+            )
 
-            if previous_path != '' and previous_path != project.local_path:
+            if previous_path != "" and previous_path != project.local_path:
                 project.local_path_changed = True
 
             project.save()
             sync_db.close()
             return Response(status=200)
 
-        return Response('Invalid path', status=400)
+        return Response("Invalid path", status=400)
 
 
-@app.route('/api/<project_id>/remove', methods=['POST'])
+@app.route("/api/<project_id>/remove", methods=["POST"])
 def remove_project(project_id):
     """Flag project so sync thread removes it and all its assets from DB."""
     try:
@@ -309,56 +316,64 @@ def remove_project(project_id):
         project.db_delete_requested = True
         project.save()
 
-        logger.info(
-            'Project {} requested to be deleted from DB'.format(project.name))
+        logger.info("Project {} requested to be deleted from DB".format(project.name))
         sync_db.close()
         return Response(status=200)
 
     except Project.DoesNotExist:
-        return Response('Bad request', status=400)
+        return Response("Bad request", status=400)
 
 
-@app.route('/api/folders', methods=['POST'])
+@app.route("/api/folders", methods=["POST"])
 def get_folders():
     """Get sub-folders in path and return them."""
     req = request.get_json()
-    current_path = os.path.abspath(req['path'])
+    current_path = os.path.abspath(req["path"])
 
-    ignore_folders = [folder.name for folder in IgnoreFolder.select().where(
-        IgnoreFolder.type == 'SYSTEM')]
+    ignore_folders = [
+        folder.name
+        for folder in IgnoreFolder.select().where(IgnoreFolder.type == "SYSTEM")
+    ]
 
-    folders = [f for f in os.listdir(current_path) if
-               os.path.isdir(os.path.join(current_path, f)) and
-               f not in ignore_folders and not f.startswith(".")]
+    folders = [
+        f
+        for f in os.listdir(current_path)
+        if os.path.isdir(os.path.join(current_path, f))
+        and f not in ignore_folders
+        and not f.startswith(".")
+    ]
 
     sync_db.close()
     return jsonify([os.path.join(current_path, f) for f in folders])
 
 
-@app.route('/api/ignorefolders', methods=['GET', 'PUT', 'DELETE'])
+@app.route("/api/ignorefolders", methods=["GET", "PUT", "DELETE"])
 def update_ignore_folders():
     """Get sub-folders in path and return them."""
-    if request.method == 'GET':
-        ignore_folders = [{"name": folder.name} for folder in
-                          IgnoreFolder.select().where(
-                              (IgnoreFolder.type == 'USER') &
-                              (IgnoreFolder.removed == False))]
+    if request.method == "GET":
+        ignore_folders = [
+            {"name": folder.name}
+            for folder in IgnoreFolder.select().where(
+                (IgnoreFolder.type == "USER") & (IgnoreFolder.removed == False)
+            )
+        ]
         sync_db.close()
         return jsonify(ignore_folders)
 
-    if request.method == 'PUT':
-        folder = request.get_json()['folder']
-        IgnoreFolder(name=folder, type='USER').save()
+    if request.method == "PUT":
+        folder = request.get_json()["folder"]
+        IgnoreFolder(name=folder, type="USER").save()
 
         sync_db.close()
         return Response(status=200)
 
-    if request.method == 'DELETE':
+    if request.method == "DELETE":
         # Flag as removed so sync loop updates all assets blocked by it.
-        folder = request.get_json()['folder']
+        folder = request.get_json()["folder"]
 
-        db_folder = IgnoreFolder.get((IgnoreFolder.type == 'USER') & (
-                IgnoreFolder.name == folder))
+        db_folder = IgnoreFolder.get(
+            (IgnoreFolder.type == "USER") & (IgnoreFolder.name == folder)
+        )
 
         db_folder.removed = True
         db_folder.save()
@@ -366,17 +381,18 @@ def update_ignore_folders():
         sync_db.close()
         return Response(status=200)
 
-    return Response('Bad request', status=400)
+    return Response("Bad request", status=400)
 
 
-@app.route('/api/log', methods=['GET'])
+@app.route("/api/log", methods=["GET"])
 def latest_log_messages():
-    messages = [{"text": log.text, "created_at": log.created_at} for log in
-                LogMessage.select().order_by(
-                    LogMessage.created_at.desc()).limit(800)]
+    messages = [
+        {"text": log.text, "created_at": log.created_at}
+        for log in LogMessage.select().order_by(LogMessage.created_at.desc()).limit(800)
+    ]
 
-    messages.sort(key=lambda m: m['created_at'])
-    messages[:] = [m['text'] for m in messages]
+    messages.sort(key=lambda m: m["created_at"])
+    messages[:] = [m["text"] for m in messages]
     log_db.close()
 
     return jsonify(messages)
@@ -387,12 +403,12 @@ def home():
     """Used if you want to serve both server and client from this web server.
     Run 'make buildweb' in project root first.
     """
-    return app.send_static_file('index.html')
+    return app.send_static_file("index.html")
 
 
-if __name__ == '__main__':
-    print('Starting Frame.io sync')
-    print('Connect on port 8080 or 5111 depending on your setup')
+if __name__ == "__main__":
+    print("Starting Frame.io sync")
+    print("Connect on port 8080 or 5111 depending on your setup")
 
     authenticated_client()  # Trigger token refresh
 
@@ -405,4 +421,4 @@ if __name__ == '__main__':
     loop = sync.SyncLoop()
     loop.start()
 
-    app.run(host='0.0.0.0', port=5111)
+    app.run(host="0.0.0.0", port=5111)
