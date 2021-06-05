@@ -11,8 +11,9 @@ from flask_cors import CORS, cross_origin
 from peewee import SqliteDatabase
 
 import config
-import frameioclient
 import sync
+
+from frameioclient import FrameioClient
 from db_models import init_log_model, init_sync_models
 from logger import PurgeOldLogMessages, handle_exception, logger
 
@@ -79,7 +80,7 @@ def authenticated_client():
 
     if login.type == "DEVTOKEN":
         logger.info("Dev token login found")
-        config.authenticated_client = frameioclient.FrameioClient(login.token)
+        config.authenticated_client = FrameioClient(login.token)
         config.client_expires = "NEVER"
 
         sync_db.close()
@@ -91,7 +92,7 @@ def authenticated_client():
         tokens["type"] = "OAUTH"
         save_tokens(tokens)
         token = tokens["access_token"]
-        config.authenticated_client = frameioclient.FrameioClient(token)
+        config.authenticated_client = FrameioClient(token)
         config.client_expires = time() + 3300  # 5min padding for safety
 
     else:
@@ -167,7 +168,7 @@ def devtoken_login():
     tokens = {"access_token": token, "refresh_token": "None", "type": "DEVTOKEN"}
 
     save_tokens(tokens)
-    config.authenticated_client = frameioclient.FrameioClient(tokens["access_token"])
+    config.authenticated_client = FrameioClient(tokens["access_token"])
     config.client_expires = "NEVER"
 
     logger.info("Logged in with dev token")
@@ -195,7 +196,7 @@ def token_exchange():
     tokens = response.json()
     tokens["type"] = "OAUTH"
     save_tokens(tokens)
-    config.authenticated_client = frameioclient.FrameioClient(tokens["access_token"])
+    config.authenticated_client = FrameioClient(tokens["access_token"])
     config.client_expires = time() + 3300  # 5min padding for safety
 
     logger.info("Logged in with OAuth")
@@ -224,7 +225,7 @@ def logout():
 def get_teams():
     """Get users teams from Frame.io."""
     if authenticated_client():
-        return jsonify(authenticated_client().get_all_teams())
+        return jsonify(authenticated_client().teams.list_all())
     return jsonify([])
 
 

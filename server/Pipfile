@@ -13,6 +13,7 @@ flask = "*"
 flask-cors = "*"
 psutil = "*"
 python-dateutil = "*"
+frameioclient = {editable = true, git = "https://github.com/Frameio/python-frameio-client.git", ref = "jh/helper-functions"}
 
 [requires]
-python_version = "3.9"
+python_version = "3.9.5"

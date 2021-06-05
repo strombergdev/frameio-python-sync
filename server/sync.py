@@ -13,9 +13,9 @@ from frameioclient import Utils
 
 # App imports
 import config
-from .db_models import init_sync_models
-from .logger import logger
-from .main import authenticated_client
+from db_models import init_sync_models
+from logger import logger
+from main import authenticated_client
 
 
 class SyncLoop(Thread):
@@ -39,9 +39,9 @@ class SyncLoop(Thread):
         """Get all projects from Frame.io and add new to DB."""
         projects = []
         try:
-            for team in authenticated_client().get_all_teams():
+            for team in authenticated_client().teams.list_all():
                 # print(f"{team['name']}: {team['id']}")
-                projects += authenticated_client().get_projects(team["id"])
+                projects += authenticated_client().teams.list_projects(team["id"])
         except (requests.exceptions.ConnectionError, requests.exceptions.HTTPError):
             raise
 
@@ -136,10 +136,8 @@ class SyncLoop(Thread):
         ).isoformat()
 
         try:
-            account_id = authenticated_client().get_project(project.project_id)[
-                "root_asset"
-            ]["account_id"]
-            updated_assets = authenticated_client().get_updated_assets(
+            account_id = authenticated_client().projects.get(project.project_id)["root_asset"]["account_id"]
+            updated_assets = authenticated_client().helpers.get_updated_assets(
                 account_id, project.project_id, project.last_frameio_scan
             )
 
@@ -447,7 +445,7 @@ class SyncLoop(Thread):
 
         for file in new_files:
             try:
-                asset = authenticated_client().get_asset(file.asset_id)
+                asset = authenticated_client().assets.get(file.asset_id)
             except requests.exceptions.HTTPError:
                 logger.info("File removed from Frame.io")
                 file.delete_instance()
@@ -472,7 +470,7 @@ class SyncLoop(Thread):
                 logger.info("Downloading: {}".format(file.path))
 
                 try:
-                    authenticated_client().download(
+                    authenticated_client().assets.download(
                         asset, download_folder=download_folder, replace=False
                     )
 
@@ -485,19 +483,6 @@ class SyncLoop(Thread):
             else:
                 logger.info("Download folder not found: {}".format(file.path))
                 file.delete_instance()
-
-    @staticmethod
-    def new_frameio_folder(name, parent_asset_id):
-        """Create single folder on Frame.io"""
-        logger.info("Creating Frame.io folder: {}".format(name))
-
-        asset = authenticated_client().create_asset(
-            parent_asset_id=parent_asset_id,
-            name=name,
-            type="folder",
-        )
-
-        return asset["id"]
 
     def create_frameio_folder_tree(self, project, new_folder_path):
         """Step up folder tree in DB to find the closest parent folder on
@@ -533,7 +518,7 @@ class SyncLoop(Thread):
 
         new_tree = os.path.relpath(new_folder_path, parent_path)
         for folder in new_tree.split("/"):
-            asset_id = self.new_frameio_folder(folder, parent_asset_id)
+            asset_id = authenticated_client().assets.create_folder(parent_asset_id, folder)['id']
 
             path = os.path.join(parent_path, folder)
             asset = self.Asset.get(
@@ -545,23 +530,6 @@ class SyncLoop(Thread):
 
             parent_asset_id = asset_id
             parent_path = path
-
-    @staticmethod
-    def upload_asset(abs_path, parent_asset_id):
-        """Upload single asset to Frame.io."""
-        file_mime = mimetypes.guess_type(abs_path)[0]
-        new_asset = authenticated_client().create_asset(
-            parent_asset_id=parent_asset_id,
-            name=os.path.basename(abs_path),
-            type="file",
-            filetype=file_mime,
-            filesize=os.path.getsize(abs_path),
-        )
-
-        with open(abs_path, "rb") as ul_file:
-            authenticated_client().upload(new_asset, ul_file)
-
-        return new_asset
 
     def upload_new_assets(self, project):
         """Upload new local assets to Frame.io and save new asset ids to DB."""
@@ -607,7 +575,7 @@ class SyncLoop(Thread):
                     self.Asset.path == os.path.dirname(file.path),
                 ).asset_id
 
-            new_asset = self.upload_asset(abs_path, parent_asset_id)
+            new_asset = authenticated_client().assets.upload(parent_asset_id, abs_path)
             logger.info("Upload done")
 
             file.asset_id = new_asset["id"]
@@ -628,7 +596,7 @@ class SyncLoop(Thread):
             return
 
         try:
-            authenticated_client().delete_asset(asset.asset_id)
+            authenticated_client().assets.delete(asset.asset_id)
         except requests.exceptions.HTTPError:  # Deleted by user already.
             pass
 
@@ -674,7 +642,7 @@ class SyncLoop(Thread):
             project = self.Project.get(self.Project.project_id == asset.project_id)
 
             try:
-                frameio_asset = authenticated_client().get_asset(asset.asset_id)
+                frameio_asset = authenticated_client().assets.get(asset.asset_id)
             except requests.exceptions.HTTPError:
                 logger.info("Asset deleted from Frame.io, skipping")
                 asset.upload_verified = True
