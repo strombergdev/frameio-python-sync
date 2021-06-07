@@ -83,4 +83,5 @@ def init_sync_models(db):
         for folder in SYSTEM_FOLDERS:
             IgnoreFolder(name=folder, type='SYSTEM').save()
 
+    db.close()
     return Login, Project, Asset, IgnoreFolder

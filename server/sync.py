@@ -26,6 +26,8 @@ class SyncLoop(Thread):
         self.Project, self.Asset, self.IgnoreFolder = init_sync_models(
             self.db)[1:]
 
+        self.db.close()
+
     @staticmethod
     def wildcard_match(name, ignore_list):
         for ignore in ignore_list:

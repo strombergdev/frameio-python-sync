@@ -18,6 +18,7 @@ class DBLogHandler(logging.Handler):
         self.db = SqliteDatabase(os.path.join(config.DB_FOLDER, 'log.db'),
                                  pragmas={'journal_mode': 'wal'})
         self.LogMessage = init_log_model(self.db)
+        self.db.close()
 
     def emit(self, record):
         # Wait for DB write lock from other threads.
@@ -43,6 +44,7 @@ class PurgeOldLogMessages(Thread):
         self.db = SqliteDatabase(os.path.join(config.DB_FOLDER, 'log.db'),
                                  pragmas={'journal_mode': 'wal'})
         self.LogMessage = init_log_model(self.db)
+        self.db.close()
 
         self.log_ttl = 259200  # 3 days
         self.check_interval = 1800  # 30 mins

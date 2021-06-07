@@ -28,10 +28,12 @@ TOKEN_URL = "https://applications.frame.io/oauth2/token"
 sync_db = SqliteDatabase(os.path.join(config.DB_FOLDER, 'sync.db'),
                          pragmas={'journal_mode': 'wal'})
 Login, Project, Asset, IgnoreFolder = init_sync_models(sync_db)
+sync_db.close()
 
 log_db = SqliteDatabase(os.path.join(config.DB_FOLDER, 'log.db'),
                         pragmas={'journal_mode': 'wal'})
 LogMessage = init_log_model(log_db)
+log_db.close()
 
 sys.excepthook = handle_exception
 
