@@ -4,16 +4,12 @@
 ![Screenshot 2020-07-17 at 13 26 11](https://user-images.githubusercontent.com/63540107/87785797-176e0a00-c839-11ea-9987-f368c7494725.png)
 
 
+
 ### Running with Docker
 
-This is the command you'll run, making sure to put your CLIENT_ID in. It's possible to do this a `.env` file as well. 
-
-One important thing to call out is that you will have to make sure you're mounting the correct volume to your container.
-
-We have not published the docker container to Docker Hub yet, so you will need to build it locally using the following command:
 
 ```sh
-make build-docker
+docker pull strombergdev/frameio-python-sync
 ```
 
 In order for the server, running in Docker, to be able to see your local filesystem, you have to mount/bind the directory you'd like to expose to the daemon by constructing the correct volume mount string.
@@ -21,26 +17,31 @@ In order for the server, running in Docker, to be able to see your local filesys
 For this example, we're going to mount a directory called 'Sync' that is located at `/Users/jeff/Sync`.
 
 ```sh
-docker run -it -v $PWD/data:/app/server/db -v /Users/jeff/Sync:/app/mount -p 5111:5111 fio-sync:latest
+docker run -it -v $PWD/data:/app/server/db -v /Users/jeff/Sync:/app/mount -p 5111:5111 strombergdev/frameio-python-sync:latest
 ```
+Select /app/mount in the web interface to sync your files to /Users/jeff/Sync.
 
-### Setup
-
-##### Requirements: Python 3.5-3.7 and npm.
-
-##### Dev token login (only one login method required):
+### Login
+If you are using docker you should be able to login with your Frame.io username and password. Another option is to use a dev token or a custom OAuth app as instructed below. 
+##### Dev token login:
 1. Create a dev token at [developer.frame.io](https://developer.frame.io)
     - Required scopes: asset.read, asset.create, asset.delete, project.read, team.read, account.read
 
+##### Custom OAuth app:
 
-##### OAuth login:
 1. Create a PKCE OAuth app at [developer.frame.io](https://developer.frame.io)
     - Required scopes: offline, asset.read, asset.create, asset.delete, project.read, team.read, account.read
     - Running on localhost:
-        - Set Redirect URIs to http://127.0.0.1:8080
+        - Set Redirect URIs to http://127.0.0.1:5111 (port 8080 if running with npm run serve)
     - Running on server:  
         - Set Redirect URIs to [http://SERVER_IP:5111](http://SERVER_IP:5111)
 2. Enter CLIENT_ID and REDIRECT_URL into config.py
+
+### Manual install 
+
+##### Requirements: Python 3.5-3.9 and npm.
+
+
 
 
 ##### Setup/start server:
