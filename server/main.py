@@ -7,6 +7,7 @@ import requests
 import requests.auth
 import sync
 from db_models import init_sync_models, init_log_model
+from db_handler import WriteQueueConsumer, db_queue
 from peewee import SqliteDatabase
 from time import time
 from logger import logger, handle_exception, PurgeOldLogMessages
@@ -99,7 +100,8 @@ def authenticated_client():
 
         login = Login.select().limit(1).get()
         login.token = ''
-        login.save()
+        db_queue.put([login, 'save'])
+        
         return False
 
     if not sync_db.is_closed():
@@ -120,7 +122,7 @@ def save_tokens(tokens):
     else:
         login.token_expires = time() + 3300  # 5min padding for safety
 
-    login.save()
+    db_queue.put([login, 'save'])
     sync_db.close()
 
 
@@ -209,12 +211,12 @@ def logout():
     config.client_expires = 0
 
     login = Login.select().limit(1).get()
-    login.delete_instance()
+    db_queue.put([login, 'delete'])
     Login.create()  # Default row
     for asset in Asset.select():
-        asset.delete_instance()
+        db_queue.put([asset, 'delete'])
     for project in Project.select():
-        project.delete_instance()
+        db_queue.put([project, 'delete'])
 
     sync_db.close()
     return Response(status=200)
@@ -267,11 +269,11 @@ def update_project(project_id):
         if req['sync'] is False:
             logger.info('Sync changed to FALSE for {}'.format(project.name))
             project.sync = False
-            project.save()
+            db_queue.put([project, 'save'])
         else:
             logger.info('Sync changed to TRUE for {}'.format(project.name))
             project.sync = True
-            project.save()
+            db_queue.put([project, 'save'])
 
         sync_db.close()
         return Response(status=200)
@@ -296,7 +298,7 @@ def update_project(project_id):
             if previous_path != '' and previous_path != project.local_path:
                 project.local_path_changed = True
 
-            project.save()
+            db_queue.put([project, 'save'])
             sync_db.close()
             return Response(status=200)
 
@@ -309,7 +311,7 @@ def remove_project(project_id):
     try:
         project = Project.get(Project.project_id == project_id)
         project.db_delete_requested = True
-        project.save()
+        db_queue.put([project, 'save'])
 
         logger.info(
             'Project {} requested to be deleted from DB'.format(project.name))
@@ -350,7 +352,8 @@ def update_ignore_folders():
 
     if request.method == 'PUT':
         folder = request.get_json()['folder']
-        IgnoreFolder(name=folder, type='USER').save()
+        new_ignore = IgnoreFolder(name=folder, type='USER')
+        db_queue.put([new_ignore, 'save'])
 
         sync_db.close()
         return Response(status=200)
@@ -363,7 +366,7 @@ def update_ignore_folders():
                 IgnoreFolder.name == folder))
 
         db_folder.removed = True
-        db_folder.save()
+        db_queue.put([db_folder, 'save'])
 
         sync_db.close()
         return Response(status=200)
@@ -398,13 +401,16 @@ if __name__ == '__main__':
 
     authenticated_client()  # Trigger token refresh
 
+    # Start DB write queue consumer
+    WriteQueueConsumer(db=sync_db).start()
+
     # Start logging cleanup thread
     setup_thread_excepthook()
     purge = PurgeOldLogMessages()
     purge.start()
 
     # Start sync thread
-    loop = sync.SyncLoop()
+    loop = sync.SyncLoop(db=sync_db, project=Project, asset=Asset, ignore_folder=IgnoreFolder)
     loop.start()
-
+    
     app.run(host='0.0.0.0', port=5111)

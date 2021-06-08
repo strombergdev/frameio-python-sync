@@ -7,26 +7,23 @@ from time import sleep, time
 
 import requests
 from dateutil import parser
-from peewee import SqliteDatabase
 from requests import auth
 
 import config
-from db_models import init_sync_models
+from db_handler import db_queue
 from frameioclient.utils import calculate_hash
 from logger import logger
 from main import authenticated_client
 
 
 class SyncLoop(Thread):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, db, project, asset, ignore_folder, **kwargs):
+        super().__init__(**kwargs)
         self.daemon = True
-        self.db = SqliteDatabase(os.path.join(config.DB_FOLDER, 'sync.db'),
-                                 pragmas={'journal_mode': 'wal'})
-        self.Project, self.Asset, self.IgnoreFolder = init_sync_models(
-            self.db)[1:]
-
-        self.db.close()
+        self.db = db
+        self.Project = project
+        self.Asset = asset
+        self.IgnoreFolder = ignore_folder
 
     @staticmethod
     def wildcard_match(name, ignore_list):
@@ -61,7 +58,7 @@ class SyncLoop(Thread):
                 # Check if project has been renamed
                 if db_project.name != project['name']:
                     db_project.name = project['name']
-                    db_project.save()
+                    db_queue.put([db_project, 'save'])
 
                     logger.info(
                         'Renamed project {} to {}'.format(db_project.name,
@@ -70,11 +67,12 @@ class SyncLoop(Thread):
             except self.Project.DoesNotExist:
                 logger.info('New project found: {}'.format(project['name']))
 
-                self.Project(name=project['name'],
-                             project_id=project['id'],
-                             root_asset_id=project['root_asset_id'],
-                             team_id=project['team_id'],
-                             on_frameio=True).save()
+                new_project = self.Project(name=project['name'],
+                                           project_id=project['id'],
+                                           root_asset_id=project['root_asset_id'],
+                                           team_id=project['team_id'],
+                                           on_frameio=True)
+                db_queue.put([new_project, 'save'])
 
         # Check if any projects have been deleted
         active_projects = [project['id'] for project in projects]
@@ -84,7 +82,7 @@ class SyncLoop(Thread):
             if db_project.project_id not in active_projects:
                 db_project.deleted_from_frameio = True
                 db_project.sync = False
-                db_project.save()
+                db_queue.put([db_project, 'save'])
 
                 logger.info(
                     "Project {} has been deleted, "
@@ -108,7 +106,7 @@ class SyncLoop(Thread):
             if child.path == '':
                 child.path = os.path.join(parent_path, child.name)
                 child.ignore = ignore
-                child.save()
+                db_queue.put([child, 'save'])
                 logger.info('Added path to folder {}'.format(child.path))
 
             self.calculate_missing_paths(project, child.asset_id, child.path,
@@ -194,13 +192,14 @@ class SyncLoop(Thread):
             except self.Asset.DoesNotExist:
                 pass
 
-            self.Asset(name=folder['name'],
-                       project_id=project.project_id,
-                       path=path,
-                       asset_id=folder['id'],
-                       parent_id=folder['parent_id'],
-                       ignore=ignore,
-                       on_frameio=True).save()
+            new_asset = self.Asset(name=folder['name'],
+                                   project_id=project.project_id,
+                                   path=path,
+                                   asset_id=folder['id'],
+                                   parent_id=folder['parent_id'],
+                                   ignore=ignore,
+                                   on_frameio=True)
+            db_queue.put([new_asset, 'save'])
             added_folders += 1
 
         # If folders are out of order from Frame.io we need to calc paths.
@@ -246,15 +245,16 @@ class SyncLoop(Thread):
                     duplicates_files += 1
 
                 except self.Asset.DoesNotExist:
-                    self.Asset(name=file['name'],
-                               project_id=project.project_id,
-                               path=asset_path,
-                               is_file=True,
-                               asset_id=file['id'],
-                               parent_id=file['parent_id'],
-                               original=file['original'],
-                               ignore=ignore,
-                               on_frameio=True).save()
+                    new_asset = self.Asset(name=file['name'],
+                                           project_id=project.project_id,
+                                           path=asset_path,
+                                           is_file=True,
+                                           asset_id=file['id'],
+                                           parent_id=file['parent_id'],
+                                           original=file['original'],
+                                           ignore=ignore,
+                                           on_frameio=True)
+                    db_queue.put([new_asset, 'save'])
                 added_files += 1
 
         if added_folders - duplicates_folders != 0:
@@ -267,7 +267,7 @@ class SyncLoop(Thread):
         if len(new_files) == added_files:  # All done. Moving up timestamp.
             project.last_frameio_scan = new_scan_timestamp
 
-        project.save()
+        db_queue.put([project, 'save'])
 
     def update_local_assets(self, project, ignore_folders):
         """Scan local storage for assets and creates new ones in DB.
@@ -323,7 +323,7 @@ class SyncLoop(Thread):
                             # Already synced
                             if db_asset.on_local_storage is False:
                                 db_asset.on_local_storage = True
-                                db_asset.save()
+                                db_queue.put([db_asset, 'save'])
 
                         # New file
                         except self.Asset.DoesNotExist:
@@ -334,12 +334,13 @@ class SyncLoop(Thread):
                                 continue
 
                             new_files = True
-                            self.Asset(name=name,
-                                       project_id=project.project_id,
-                                       path=path,
-                                       is_file=True,
-                                       on_local_storage=True,
-                                       local_xxhash=file_hash).save()
+                            new_asset = self.Asset(name=name,
+                                                   project_id=project.project_id,
+                                                   path=path,
+                                                   is_file=True,
+                                                   on_local_storage=True,
+                                                   local_xxhash=file_hash)
+                            db_queue.put([new_asset, 'save'])
 
             for name in dirs:
                 full_path = os.path.join(root, name)
@@ -360,18 +361,19 @@ class SyncLoop(Thread):
                         # Already synced
                         if db_asset.on_local_storage is False:
                             db_asset.on_local_storage = True
-                            db_asset.save()
+                            db_queue.put([db_asset, 'save'])
 
                     except self.Asset.DoesNotExist:
                         new_folders = True
-                        self.Asset(name=name,
-                                   project_id=project.project_id,
-                                   on_local_storage=True,
-                                   path=path).save()
+                        new_asset = self.Asset(name=name,
+                                               project_id=project.project_id,
+                                               on_local_storage=True,
+                                               path=path)
+                        db_queue.put([new_asset, 'save'])
 
         if all_assets_ready:
             project.last_local_scan = new_scan_time
-            project.save()
+            db_queue.put([project, 'save'])
 
         if new_folders:
             logger.info(
@@ -407,14 +409,14 @@ class SyncLoop(Thread):
                 exist_ok=True)
 
             folder.on_local_storage = True
-            folder.save()
+            db_queue.put([folder, 'save'])
 
         for file in new_files:
             try:
                 asset = authenticated_client().get_asset(file.asset_id)
             except requests.exceptions.HTTPError:
                 logger.info('File removed from Frame.io')
-                file.delete_instance()
+                db_queue.put(file, 'delete')
                 continue
 
             if asset['checksums'] is None:
@@ -443,10 +445,10 @@ class SyncLoop(Thread):
 
                 # Add local props to new file
                 file.on_local_storage = True
-                file.save()
+                db_queue.put([file, 'save'])
             else:
                 logger.info('Download folder not found: {}'.format(file.path))
-                file.delete_instance()
+                db_queue.put([file, 'delete'])
 
     @staticmethod
     def new_frameio_folder(name, parent_asset_id):
@@ -501,7 +503,7 @@ class SyncLoop(Thread):
                                    self.Asset.project_id == project.project_id)
             asset.asset_id = asset_id
             asset.on_frameio = True
-            asset.save()
+            db_queue.put([asset, 'save'])
 
             parent_asset_id = asset_id
             parent_path = path
@@ -542,7 +544,7 @@ class SyncLoop(Thread):
             if not os.path.isdir(
                     os.path.join(project.local_path, folder.path)):
                 logger.info("Can't find {}, skipping.".format(folder.name))
-                folder.delete_instance()
+                db_queue.put([folder, 'delete'])
                 continue
 
             self.create_frameio_folder_tree(project=project,
@@ -551,7 +553,7 @@ class SyncLoop(Thread):
         for file in new_files:
             if not os.path.isfile(os.path.join(project.local_path, file.path)):
                 logger.info("Can't find {}".format(file.name))
-                file.delete_instance()
+                db_queue.put([file, 'delete'])
                 continue
 
             logger.info('Uploading asset: {}'.format(file.path))
@@ -574,7 +576,7 @@ class SyncLoop(Thread):
             file.uploaded_at = int(time())
             file.on_frameio = True
             file.upload_verified = False
-            file.save()
+            db_queue.put([file, 'save'])
 
     def delete_and_reupload(self, project, asset):
         """Delete and re-upload asset to Frame.io. Max attempts: 3."""
@@ -584,7 +586,7 @@ class SyncLoop(Thread):
             logger.info(
                 'Asset already uploaded 3 times. Marking as successful anyway')
             asset.upload_verified = True
-            asset.save()
+            db_queue.put([asset, 'save'])
             return
 
         try:
@@ -597,7 +599,7 @@ class SyncLoop(Thread):
 
         if not os.path.isfile(abs_path):
             logger.info('{} not found'.format(asset.name))
-            asset.delete_instance()
+            db_queue.put([asset, 'delete'])
             return
 
         if os.path.dirname(asset.path) == '':
@@ -615,7 +617,7 @@ class SyncLoop(Thread):
         asset.on_frameio = True
         asset.upload_verified = False
         asset.upload_retries += 1
-        asset.save()
+        db_queue.put([asset, 'save'])
 
     def verify_new_uploads(self):
         """Get xxhash from Frame.io and compare it to local hash in DB.
@@ -642,7 +644,7 @@ class SyncLoop(Thread):
             except requests.exceptions.HTTPError:
                 logger.info('Asset deleted from Frame.io, skipping')
                 asset.upload_verified = True
-                asset.save()
+                db_queue.put([asset, 'save'])
                 continue
 
             if frameio_asset.get('upload_completed_at') is None:
@@ -660,7 +662,7 @@ class SyncLoop(Thread):
                         logger.info('Upload succeeded')
                         asset.frameio_xxhash = frameio_hash
                         asset.upload_verified = True
-                        asset.save()
+                        db_queue.put([asset, 'save'])
 
                 except (KeyError, TypeError):
                     logger.info('No calculated checksum yet')
@@ -672,7 +674,7 @@ class SyncLoop(Thread):
                             """30 mins since upload and no checksum on 
                             Frame.io, marking as successful anyway""")
                         asset.upload_verified = True
-                        asset.save()
+                        db_queue.put([asset, 'save'])
 
     def delete_db_project(self, project):
         """Delete project and its associated assets from DB."""
@@ -680,27 +682,27 @@ class SyncLoop(Thread):
 
         for asset in self.Asset.select().where(
                 self.Asset.project_id == project.project_id):
-            asset.delete_instance()
+            db_queue.put([asset, 'delete'])
 
-        project.delete_instance()
+        db_queue.put([project, 'delete'])
 
     def delete_assets_from_db(self, project):
         """Delete all assets from DB."""
         for asset in self.Asset.select().where(
                 self.Asset.project_id == project.project_id):
-            asset.delete_instance()
+            db_queue.put([asset, 'delete'])
 
     def remove_ignore_flag(self, assets, ignore_folders):
         for asset in assets:
             if asset.is_file:
                 asset.ignore = False
-                asset.save()
+                db_queue.put([asset, 'save'])
 
             if not asset.is_file:
                 if asset.name not in ignore_folders and not self.wildcard_match(
                         asset.name, ignore_folders):
                     asset.ignore = False
-                    asset.save()
+                    db_queue.put([asset, 'save'])
                     children = self.Asset.select().where(
                         self.Asset.parent_id == asset.asset_id)
                     self.remove_ignore_flag(children, ignore_folders)
@@ -733,20 +735,17 @@ class SyncLoop(Thread):
                                    f.name, [ignore_folder.name])]
 
             self.remove_ignore_flag(blocked_folders, active_ignore_folders)
-            ignore_folder.delete_instance()
+            db_queue.put([ignore_folder, 'delete'])
 
         for project in self.Project.select():  # Trigger re-scan of all
             project.last_local_scan = 0
-            project.save()
+            db_queue.put([project, 'save'])
 
     def run(self):
         while True:
             if authenticated_client():
                 try:
                     logger.info('Checking for updates')
-                    if self.db.is_closed():
-                        self.db.connect()
-
                     self.update_projects()
 
                     ignore_folders = [folder.name for folder in
@@ -789,7 +788,7 @@ class SyncLoop(Thread):
                     project.local_path_changed = False
                     project.last_local_scan = 0
                     project.last_frameio_scan = '2014-02-07T00:00:01.000000+00:00'
-                    project.save()
+                    db_queue.put([project, 'save'])
 
                 # Updated ignored assets if an ignore folder has been removed.
                 if self.IgnoreFolder.select().where(
