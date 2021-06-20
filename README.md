@@ -20,8 +20,13 @@ In order for the server, running in Docker, to be able to see your local filesys
 
 For this example, we're going to mount a directory called 'Sync' that is located at `/Users/jeff/Sync`.
 
+Run interactive
 ```sh
-docker run -it -v $PWD/data:/app/server/db -v /Users/jeff/Sync:/app/mount -p 5111:5111 fio-sync:latest
+docker run -d -v $PWD/data:/app/server/db -v /Users/jeff/Sync:/app/mount -p 5111:5111 --restart always strombergdev/frameio-python-sync:latest
+```
+
+```sh
+docker run -it -v $PWD/data:/app/server/db -v /Users/jeff/Sync:/app/mount -p 5111:5111 strombergdev/frameio-python-sync:latest
 ```
 
 ### Setup
