@@ -1,4 +1,5 @@
 import os
+import platform
 
 DB_FOLDER = 'db'
 os.makedirs('db', exist_ok=True)
@@ -12,6 +13,13 @@ SCAN_INTERVAL = 60
 CLIENT_ID = os.getenv('CLIENT_ID', '24a75470-e2e5-45c7-80dc-ac306c1d7875')
 REDIRECT_URL = 'http://127.0.0.1:5111'
 SCOPES = 'project.read asset.create offline asset.read team.read account.read asset.delete'
+
+TELEMETRY_HEADERS = {
+    "x-vendor-name": os.getenv("VENDOR", "@strombergdev"),
+    "x-client-name": os.getenv("CLIENT_NAME", "frameio-python-sync"),
+    "x-client-version": os.getenv("VERSION", "1.0.4"),
+    "x-platform": os.getenv("PLATFORM", platform.system())
+}
 
 # Cache variables used for storing active Frame.io client.
 authenticated_client = None
