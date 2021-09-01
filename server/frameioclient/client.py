@@ -3,6 +3,7 @@ import sys
 import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
+from config import TELEMETRY_HEADERS
 
 from .download import FrameioDownloader
 
@@ -103,7 +104,8 @@ class FrameioClient(object):
 
     headers = {
       'Authorization': 'Bearer {}'.format(self.token),
-      'x-frameio-client': 'python/{}'.format(self.client_version)
+      'x-frameio-client': "{}/{}".format(TELEMETRY_HEADERS['x-client-name'], TELEMETRY_HEADERS['x-client-version']),
+      **TELEMETRY_HEADERS
     }
 
     adapter = HTTPAdapter(max_retries=self.retry_strategy)
